@@ -1,21 +1,26 @@
 import {create} from 'zustand'
-import {DEFAULT_RATES,dispatch,seedDevices,tick,type Device,type Rates,type Room,type Scenario} from './energy.ts'
-export type Sample={minute:number;demand:number;solar:number;battery:number;grid:number;generator:number}
-interface State { devices:Device[]; selected:string; room:Room|'All rooms'; scenario:Scenario; soc:number; rates:Rates; paused:boolean; minute:number; energy:number; cost:number; samples:Sample[]; savedPlan:Record<string,boolean>|null; notice:string;
- select:(id:string)=>void;setRoom:(room:Room|'All rooms')=>void;setScenario:(s:Scenario)=>void;toggle:(id:string)=>void;setOnline:(id:string)=>void;setCritical:(id:string)=>void;add:(d:Pick<Device,'name'|'room'|'watts'|'critical'|'kind'>)=>void;remove:(id:string)=>void;advance:()=>void;pause:()=>void;essential:()=>void;restore:()=>void;reset:()=>void;setRate:(key:keyof Rates,value:number)=>void }
-const initial=()=>({devices:seedDevices(), selected:'ac',room:'All rooms' as const,scenario:'day' as const,soc:72,rates:{...DEFAULT_RATES},paused:false,minute:0,energy:0,cost:0,samples:[] as Sample[],savedPlan:null,notice:''})
-export const useEnergy=create<State>((set,get)=>({...initial(),
+import {type Device,type Rates,type Room,type Scenario} from './energy.ts'
+import {api,type Snapshot} from './telemetry.ts'
+interface State {devices:Device[];selected:string;room:Room|'All rooms';scenario:Scenario;soc:number;rates:Rates;paused:boolean;minute:number;energy:number;cost:number;samples:{minute:number;demand:number;solar:number;battery:number;grid:number;generator:number}[];savedPlan:Record<string,boolean>|null;notice:string;telemetry:Snapshot|null;connection:'connecting'|'connected'|'error';error:string|null;busy:boolean;
+ select:(id:string)=>void;setRoom:(room:Room|'All rooms')=>void;setScenario:(s:Scenario)=>void;toggle:(id:string)=>void;setOnline:(id:string)=>void;setCritical:(id:string)=>void;add:(d:Pick<Device,'name'|'room'|'watts'|'critical'|'kind'>)=>void;remove:(id:string)=>void;advance:()=>void;pause:()=>void;essential:()=>void;restore:()=>void;reset:()=>void;setRate:(key:keyof Rates,value:number)=>void;refresh:()=>Promise<void>;mutate:(path:string,method:string,body?:unknown)=>Promise<boolean>}
+export const useEnergy=create<State>((set,get)=>({devices:[],selected:'',room:'All rooms',scenario:'day',soc:NaN,rates:{grid:0,generator:0,battery:0},paused:false,minute:0,energy:0,cost:0,samples:[],savedPlan:null,notice:'',telemetry:null,connection:'connecting',error:null,busy:false,
  select:selected=>set({selected}),setRoom:room=>set({room}),
- setScenario:scenario=>set({scenario,notice:`${scenario==='outage'?'Grid supply lost — reviewing backup coverage.':'Scenario updated.'}`}),
- toggle:id=>set(s=>({devices:s.devices.map(d=>d.id===id?{...d,on:!d.on,reading:d.on?0:d.watts}:d)})),
- setOnline:id=>set(s=>({devices:s.devices.map(d=>d.id===id?{...d,online:!d.online}:d)})),
- setCritical:id=>set(s=>({devices:s.devices.map(d=>d.id===id?{...d,critical:!d.critical}:d)})),
- add:d=>{ const id=crypto.randomUUID(); set(s=>({devices:[...s.devices,{...d,id,monitorId:`MON-${id.slice(0,6).toUpperCase()}`,on:true,online:true,reading:d.watts,energy:0,cost:0}],selected:id,room:'All rooms',notice:`${d.name} attached to ${d.room} with a simulated monitor.`})) },
- remove:id=>set(s=>({devices:s.devices.filter(d=>d.id!==id),selected:s.devices.find(d=>d.id!==id)?.id||'',notice:'Monitor removed from the demo.'})),
- advance:()=>{const s=get();if(s.paused)return;const result=tick(s.devices,s.scenario,s.soc,s.rates,s.minute/5);set({devices:result.devices,soc:result.soc,minute:s.minute+5,energy:s.energy+result.energy,cost:s.cost+result.cost,samples:[...s.samples,{minute:s.minute+5,...result.flow}].slice(-36)})},
- pause:()=>set(s=>({paused:!s.paused})),
- essential:()=>set(s=>({savedPlan:s.savedPlan||Object.fromEntries(s.devices.map(d=>[d.id,d.on])),devices:s.devices.map(d=>{const on=d.critical&&(s.savedPlan?.[d.id]??d.on);return {...d,on,reading:d.online?(on?d.watts:0):d.reading}}),notice:'Essential-load plan applied in simulation. Non-essential appliances are paused.'})),
- restore:()=>set(s=>({devices:s.devices.map(d=>({...d,on:s.savedPlan?.[d.id]??d.on,reading:d.online?(s.savedPlan?.[d.id]??d.on)?d.watts:0:d.reading})),savedPlan:null,notice:'Previous appliance plan restored.'})),
- reset:()=>set(initial()),setRate:(key,value)=>{if(Number.isFinite(value)&&value>=0&&value<=100)set(s=>({rates:{...s.rates,[key]:value}}))}
+ refresh:async()=>{try{const t=await api<Snapshot>('/snapshot');const devices=t.devices.filter(d=>d.role==='appliance').map(d=>({id:d.id,name:d.name,room:d.room as Room,kind:d.kind,monitorId:d.id,watts:d.nominal_power_w??0,critical:d.critical,on:d.power_w!=null&&d.power_w>0,online:d.fresh&&d.power_w!=null,reading:d.power_w??d.last_known_power_w??0,energy:(d.energy_wh??0)/1000,cost:d.cost_at_grid_rate_ghs??0}));set({telemetry:t,devices,selected:devices.some(d=>d.id===get().selected)?get().selected:devices[0]?.id||'',soc:t.battery_soc_pct??NaN,rates:{grid:t.settings.rates.grid??0,generator:t.settings.rates.generator??0,battery:t.settings.rates.battery??0},scenario:t.simulation.scenario,paused:t.simulation.paused,energy:(t.energy_wh??0)/1000,cost:t.cost_at_grid_rate_ghs??0,connection:'connected',error:null})}catch(e){set({connection:'error',error:(e as Error).message,telemetry:get().telemetry?{...get().telemetry!,demand_w:null,sources:{solar:null,grid:null,battery:null,generator:null},battery_soc_pct:null,devices:get().telemetry!.devices.map(d=>({...d,fresh:false,power_w:null}))}:null,devices:get().devices.map(d=>({...d,online:false})),notice:'Backend unavailable. Last readings are not current.'})}},
+ mutate:async(path,method,body)=>{if(get().busy)return false;set({busy:true,error:null});try{await api(path,method,body);await get().refresh();return true}catch(e){set({error:(e as Error).message,notice:(e as Error).message});return false}finally{set({busy:false})}},
+ advance:()=>{void get().refresh()},
+ setScenario:scenario=>{void get().mutate('/simulation','PATCH',{scenario})},
+ toggle:id=>{const d=get().telemetry?.devices.find(d=>d.id===id);if(!d?.simulator_control){set({notice:'This device is monitor-only. Physical switching is not implemented.'});return}void get().mutate('/simulation','PATCH',{states:{[id]:!(get().telemetry?.simulation.states[id]??true)}})},
+ setOnline:id=>{const t=get().telemetry,d=t?.devices.find(d=>d.id===id);if(!d?.simulator_control)return;void get().mutate('/simulation','PATCH',{offline_ids:t!.simulation.offline_ids.includes(id)?t!.simulation.offline_ids.filter(x=>x!==id):[...t!.simulation.offline_ids,id]})},
+ setCritical:id=>{const d=get().devices.find(d=>d.id===id);if(d)void get().mutate(`/devices/${id}`,'PATCH',{critical:!d.critical})},
+ add:d=>{void get().mutate('/devices','POST',{id:crypto.randomUUID(),name:d.name,room:d.room,kind:d.kind,role:'appliance',measurement_kind:'direct',gateway_id:'simulator',nominal_power_w:d.watts,critical:d.critical,expected_interval_s:2})},
+ remove:id=>{void get().mutate(`/devices/${id}`,'DELETE')},
+ pause:()=>{void get().mutate('/simulation','PATCH',{paused:!get().paused})},
+ essential:()=>{const t=get().telemetry;if(!t)return;set({savedPlan:{...t.simulation.states}});const states=Object.fromEntries(t.devices.filter(d=>d.role==='appliance'&&d.simulator_control).map(d=>[d.id,d.critical&&(t.simulation.states[d.id]??true)]));void get().mutate('/simulation','PATCH',{states})},
+ restore:()=>{const previous=get().savedPlan;if(previous)void get().mutate('/simulation','PATCH',{states:previous});set({savedPlan:null})},
+ reset:()=>{void get().mutate('/simulation','PATCH',{scenario:'day',paused:false,offline_ids:[],states:Object.fromEntries(get().devices.map(d=>[d.id,d.id!=='kettle']))});set({savedPlan:null,notice:'Simulator state reset. Reading history is retained.'})},
+ setRate:(key,value)=>{const rates=get().telemetry?.settings.rates;if(rates&&Number.isFinite(value)&&value>=0)void get().mutate('/settings','PUT',{rates:{...rates,[key]:value}})}
 }))
-export function getFlow(s:Pick<State,'devices'|'scenario'|'soc'|'rates'>){return dispatch(s.devices.filter(d=>d.online).reduce((sum,d)=>sum+d.reading,0),s.scenario,s.soc,s.rates)}
+export function getFlow(s:Pick<State,'telemetry'|'connection'|'devices'>){
+ const t=s.telemetry,connected=s.connection==='connected';const demand=connected?t?.demand_w??0:0
+ return {demand,solar:connected?t?.sources.solar??0:0,grid:connected?t?.sources.grid??0:0,battery:connected?t?.sources.battery??0:0,generator:connected?t?.sources.generator??0:0,unserved:0,runtime:0,usableKwh:0,costPerHour:0}
+}

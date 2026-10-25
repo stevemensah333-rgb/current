@@ -56,6 +56,7 @@ function Furniture(){
 }
 function House({roof,heatmap,interactive,onSelect,onRoom,focusRoom,focusDevice}:{roof:boolean;heatmap:boolean;interactive:boolean;onSelect:(id:string)=>void;onRoom:(room:Room)=>void;focusRoom:Room|null;focusDevice:string|null}) {
  const theme=useContext(ThemeContext),light=theme==='light',s=useEnergy(),{devices}=s,flow=getFlow(s)
+ const data=s.connection==='connected'?s.telemetry:null
  const wall=light?'#d5d5ce':'#686c69',trim=light?'#e3e4df':'#979b97',floor=light?'#b7a793':'#89806f'
  const positions=useMemo(()=>{
   const result:Record<string,[number,number,number]>={}
@@ -77,7 +78,7 @@ function House({roof,heatmap,interactive,onSelect,onRoom,focusRoom,focusDevice}:
  {!roof&&<group position={[-.25,.29,-3.45]} scale={.6} rotation={[.16,0,0]}><SolarArray/></group>}
  <Furniture/>
  <Block size={[.25,.49,.19]} position={[0,.47,2.52]} color={light?'#c1c7c4':'#646d6b'}/>
- {devices.map(d=>{const p=positions[d.id],active=d.on&&d.online,isSelected=focusDevice===d.id;const wire:[number,number,number][]=[[0,.16,2.54],[0,.16,p[2]],[p[0],.16,p[2]]];return <group key={d.id}>
+ {devices.map(d=>{const p=positions[d.id]||[-1.55,.22,1.15] as [number,number,number],active=d.on&&d.online,isSelected=focusDevice===d.id;const wire:[number,number,number][]=[[0,.16,2.54],[0,.16,p[2]],[p[0],.16,p[2]]];return <group key={d.id}>
  {!roof&&<><Line points={wire} color={!d.online?'#e38c47':active?'#00bd82':'#70746e'} lineWidth={isSelected?1.3:.7} transparent opacity={active?.6:.18}/><FlowDot points={wire} active={active}/></>}
  <group position={p} onClick={e=>{e.stopPropagation();if(interactive&&!roof)onSelect(d.id)}}><Appliance d={d}/>{isSelected&&!roof&&<mesh rotation={[-Math.PI/2,0,0]} position={[0,-p[1]+.15,0]}><ringGeometry args={[.37,.392,48]}/><meshBasicMaterial color="#00ce87" transparent opacity={.7}/></mesh>}</group>
  {interactive&&!roof&&<Html position={[p[0],p[1]+(d.kind==='fridge'?1.6:d.kind==='lights'?1.35:d.kind==='ac'?1.6:.9),p[2]]} center zIndexRange={[10,0]}><button className={`node-label ${isSelected?'selected':''} ${!d.online?'stale':''}`} onClick={()=>onSelect(d.id)} aria-label={`Select ${d.name}`}><i style={{background:!d.online?'#e38c47':active?'#00ce87':'#7d8583'}}/><span>{d.name}</span><b>{d.online?`${d.reading} watts`:'No reading'}</b></button></Html>}
@@ -87,10 +88,10 @@ function House({roof,heatmap,interactive,onSelect,onRoom,focusRoom,focusDevice}:
  <Block size={[.06,2.1,.06]} position={[4.48,1.01,-1.6]} color={light?'#a3aaa7':'#737c77'}/><Block size={[.71,.06,.08]} position={[4.48,2.03,-1.6]} color={light?'#a3aaa7':'#737c77'}/><Block size={[.23,.39,.16]} position={[4.48,1.45,-1.6]} color={light?'#c6ccc7':'#727d76'}/>
  <Block size={[.76,.48,.56]} position={[4.01,.4,1.8]} color={light?'#89968e':'#59685e'}/><Block size={[.55,.27,.022]} position={[4.01,.42,2.097]} color="#272f2d"/>{[-.18,0,.18].map(x=><Block key={x} size={[.015,.22,.025]} position={[4.01+x,.43,2.114]} color="#6d7771"/>)}
  {interactive&&!focusRoom&&!focusDevice&&<>
- <Html position={roof?[.2,3.35,-.55]:[-.25,.35,-3.83]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.solar}}/><b>{Math.round(flow.solar).toLocaleString()} W</b><span>Solar</span></div></Html>
- <Html position={[-4.05,.21,1.7]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.battery}}/><b>{s.soc.toFixed(0)}% charged</b><span>Battery · {Math.round(flow.battery)} W</span></div></Html>
- {s.scenario==='generator'&&<Html position={[4.1,.95,2.35]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.generator}}/><b>{Math.round(flow.generator).toLocaleString()} W</b><span>Generator</span></div></Html>}
- <Html position={[4.45,.12,-1.7]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.grid}}/><b>{Math.round(flow.grid).toLocaleString()} W</b><span>Grid {s.scenario==='outage'||s.scenario==='generator'?'unavailable':''}</span></div></Html>
+ <Html position={roof?[.2,3.35,-.55]:[-.25,.35,-3.83]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.solar}}/><b>{data?.sources.solar==null?'Unknown':`${Math.round(data.sources.solar).toLocaleString()} W`}</b><span>Solar</span></div></Html>
+ <Html position={[-4.05,.21,1.7]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.battery}}/><b>{data?.battery_soc_pct==null?'Charge unknown':`${data.battery_soc_pct.toFixed(0)}% charged`}</b><span>Battery · {data?.sources.battery==null?'power unknown':`${Math.round(data.sources.battery)} W`}</span></div></Html>
+ {data?.sources.generator!=null&&data.sources.generator>0&&<Html position={[4.1,.95,2.35]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.generator}}/><b>{Math.round(flow.generator).toLocaleString()} W</b><span>Generator</span></div></Html>}
+ <Html position={[4.45,.12,-1.7]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.grid}}/><b>{data?.sources.grid==null?'Unknown':`${Math.round(data.sources.grid).toLocaleString()} W`}</b><span>Grid meter</span></div></Html>
  </>}
  </group>
 }

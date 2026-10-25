@@ -1,80 +1,93 @@
-# Current — Energy House Demo
+# Apeiron — backend-connected energy base
 
-A standalone software concept for the XANIX “Power Without Certainty” opportunity. Its staged household flow follows Hurricare. The visual design follows the supplied energy-app reference: neutral surfaces, system typography, natural house materials, yellow solar and green battery accents. Current is a provisional name.
+The existing staged React/Three.js interface now reads from an authenticated local API and persistent SQLite database. A separate simulator sends timestamped readings through the same ingestion contract as future hardware. Calculations are deterministic code. No AI or NILM model is implemented.
 
-## Run
+## Start locally
 
-Requires Node.js 22.18+ and npm. From this directory:
+Requires **Node.js 24.12+** (tested with 26.3.1) and npm.
 
-```sh
+```bash
 npm ci
 npm run dev
 ```
 
-Open http://127.0.0.1:5182. This is a local preview; no service account, API key, backend or hardware is needed. The app uses system fonts and bundled assets; no external image or font service is required.
+Open **http://127.0.0.1:5182/**. The command starts:
 
-```sh
-npm test
-npm run build
-npm run preview
+- API on 127.0.0.1:5183
+- Independent simulator with real elapsed-time readings
+- Vite frontend on 127.0.0.1:5182
+
+Use `APEIRON_UI_PORT=5184 npm run dev` if an existing demo occupies 5182. Stop with Ctrl+C. Existing records remain in `.data/apeiron.sqlite`. The simulator is seeded only if the database has no devices. Its battery and source values are clearly labelled fixtures. It does not fabricate five minutes of energy every two seconds.
+
+The local development proxy injects an owner credential server-side. This is **not a production authentication/deployment setup**. Do not expose the Vite proxy to a LAN or the internet. The existing Vercel static deployment is not changed by these files.
+
+## What to try
+
+1. Open **Data & setup** to inspect all channels, provenance and freshness.
+2. Select an appliance in the house. Observe its timestamp and measurement basis under monitor details.
+3. Open **Simulator** and pause it. After 15 seconds, the default channels become stale and power displays unavailable, not zero. Resume and readings recover.
+4. Turn a simulator load on/off. Its observed state follows a new API reading, not an optimistic frontend number.
+5. Open **Understand usage** for a current ranking, known energy from the last 24 hours and stored time-series data.
+6. Open **Backup plan**, select essentials and a target duration, then calculate. Unknown/stale battery or selected-appliance readings prevent a reliable estimate. Budget intent is accepted but explicitly not evaluated.
+7. Reload the browser or restart the server. Registered devices and reading history persist.
+
+Physical channels are monitor-only. Buttons never switch real appliances. The simulator can change its own synthetic loads through an explicitly labelled action.
+
+## Develop without the simulator
+
+```bash
+npm run server
+# In another terminal:
+npm run dev:ui
 ```
 
-The production site is in `dist/`; serve it with a static HTTP server. The supplied archive contains both source and the built site. It excludes dependencies. The live working folder currently links to temporary installed development dependencies; a fresh extracted copy installs normally with `npm ci`.
+On a new database, this starts with no devices/readings and unknown battery capacity and source values. Register a gateway and channels using Data & setup or the documented API. Existing simulator installations can disable simulator input and retire conflicting channels without deleting their stored history. The simulator script must be running to generate data; the backend and UI never generate telemetry themselves.
 
-## Household screens
+The owner token is generated in `.data/owner.key` (0600). Gateway tokens are returned once at registration, stored hashed, and scoped to their devices. Do not commit, upload or distribute `.data` or its credentials.
 
-The app follows Hurricare’s staged presentation: situation → choices → analysis → results. Each screen answers one household question, with Next/Back navigation and direct access from the top bar.
+## API
 
-1. **Your home** — a large interactive house, current use, the biggest power user and a clear next action. Tap an appliance to open its details only when needed.
-2. **Appliances** — room filters, simple appliance cards and preset-based enrollment. Monitor IDs and simulation controls stay behind Monitor details.
-3. **Understand usage** — three separate topics: Biggest users, Cost & sources, and Over time. Rankings explain which appliance uses more; units are explained in plain language.
-4. **Backup plan** — Choose essentials → See the difference → Your plan. Compare estimated battery-only time before applying a simulated plan, then try a power cut or restore appliances.
+| Route | Purpose |
+|---|---|
+| GET `/api/health` | Public local health check |
+| POST `/api/v1/gateways` | Owner registers a gateway; returns one-time token |
+| POST `/api/v1/devices` | Owner registers a channel |
+| POST `/api/v1/readings` | Gateway-authenticated telemetry ingestion |
+| GET `/api/v1/gateway/config` | Gateway reads its own channel configuration |
+| GET `/api/v1/snapshot` | Owner reads readings and deterministic calculations |
+| GET `/api/v1/history?device_id=mains` | Latest 180 stored readings |
+| PUT `/api/v1/settings` | Explicit battery profile and current-rate assumptions |
+| PATCH `/api/v1/devices/:id` | Change essential-load preference |
+| DELETE `/api/v1/devices/:id` | Retire a channel; history is retained |
+| POST `/api/v1/plans/preview` | Advisory target-duration calculation; no commands |
+| PATCH `/api/v1/simulation` | Configure simulator input; cannot control hardware |
+| GET `/api/v1/insights/context` | Evidence contract for future AI; recommendations empty |
 
-Use **Try a situation** in the header to change the supply scenario, pause/resume the simulation or start over. Cost settings and CSV export are on the relevant usage screens. House viewing controls stay with the house.
+See [hardware contract](docs/HARDWARE-CONTRACT.md) for JSON examples, energy units and timestamp/retry semantics. See [architecture](docs/ARCHITECTURE.md) for assumptions and boundaries.
 
-## House views and themes
+## Reading and calculation rules
 
-- **Inside** opens a genuine architectural cutaway: the roof and two exterior walls are removed to reveal the rooms, furniture and appliances. Appliance markers remain interactive.
-- **Outside** restores the walls, gables, windows and solar roof. Switch back to Inside to select appliances.
-- **Room usage** colors rooms by their current power demand and automatically opens the house.
-- Use **Light / Dark** in the header to change the entire interface, charts, dialogs, model materials and lighting. The choice is saved in this browser and survives reloads. Dark is the initial default.
-- Source callouts show current simulated solar/grid power and battery charge. The source ring on Cost & sources uses the actual demo allocation, not a decorative fixed percentage.
+- Reported real watts take priority. Watts can be calculated from voltage, current and true power factor together. Current alone is not converted into assumed real power.
+- Energy-only channels can contribute known Wh without pretending to provide instantaneous watts.
+- Counter deltas take priority over trapezoidal power integration. Timestamps, resets, restarts, stale readings and gaps are handled explicitly.
+- A whole-home aggregate is authoritative. It is never added to child appliance readings or NILM estimates. Without it, the UI labels demand as a monitored-appliance subtotal.
+- Actual source and battery readings are separate from appliance consumption. No source/battery values are manufactured for a real installation.
+- The cost screen shows known energy at the current configured grid rate, **not a utility bill or mixed-source accounting**.
+- Backup estimates use battery charge and the configured capacity/reserve/efficiency/power limit. They assume steady load and no solar. There is no learned load forecast or budget optimizer.
+- Future inferred appliance readings include their parent and model version, with optional confidence. They are labelled estimates and excluded from reliable backup planning. No NILM model is supplied.
+- No AI recommendation or insight provider is implemented. A future provider consumes validated context; numeric calculations stay in code and physical command execution stays separate.
 
-## Present
+## Tests and build
 
-1. Start at Your home and identify the biggest power user.
-2. Select an appliance in the house, then close its details.
-3. Go to Appliances, add a water pump using its preset, and pick its room.
-4. Go to Understand usage to see the ranked explanation, source breakdown, costs and history one topic at a time.
-5. Go to Backup plan, choose essentials, compare runtime and use the plan in the demo.
-6. Try a power cut from the result screen. Restore previous appliances when finished.
+```bash
+npm test
+npm run build
+```
 
-All switches control simulated state only. Every tick is five simulated minutes, and ticks arrive every two seconds. Session energy and estimated session costs begin at zero. A reload resets the session. Start over resets the simulation and house viewing controls.
+The test suite covers current-only inputs, true-power calculation, integration/counters, resets/reboots, idempotent retries, out-of-order frames, strict validation, gateway scoping, real zero versus unknown/stale, aggregate double-count prevention, persistence, advisory planning, mixed provenance, disabled AI/control and a real independent simulator process talking to the HTTP API. The old demo test file is archived in `docs/archive/` and is not an executable acceptance suite for this base.
 
-## Code map
+The pinned Vite tooling was updated to remove inherited audit findings; npm audit reported zero known vulnerabilities at implementation time. The Three.js production bundle is still large; performance work remains before a broad production rollout.
 
-- `src/HouseScene.tsx`: procedural 3D house, appliance geometry, marker selection, animated wiring, camera controls.
-- `src/energy.ts`: shared domain types, scenario assumptions, supply dispatch and energy/cost integration.
-- `src/store.ts`: state, device enrollment, signal loss, scenario changes and plan actions.
-- `src/App.tsx`: screen navigation, household overview, appliances, usage topics, guided backup plan, enrollment, cost settings and CSV export.
-- `src/ui.tsx`: shared icons, time formatting and accessible contextual dialogs with keyboard focus management.
-- `src/style.css`: staged layout and responsive structure.
-- `src/theme.css`: reference-inspired dark/light colors, surfaces, typography and states.
-- `src/theme.ts`: saved theme preference and document appearance.
-- `src/energy.test.ts`: eight energy model/state tests, including changing an already applied backup plan.
+## What is still unbuilt
 
-## Assumptions
-
-Battery capacity 5 kWh, starting charge 72%, reserve 20%, discharge efficiency 90%, inverter 2 kW. Generator 3 kW. Daytime solar 1,050 W; outage solar 180 W; night solar zero. Battery-only runtime comparisons assume no solar contribution and constant known demand. Costs use editable illustrative GHS/kWh values, not verified Ghana utility tariffs: grid 1.95, generator 4.80, battery stored-energy cost 0.60, solar variable operating cost zero.
-
-Source dispatch uses solar first, then available grid/generator, then battery. Battery charging is outside this demo. Device cost and delivered energy are allocated proportionally to known appliance demand. Offline monitors have unknown current load and are excluded from estimates with an incompleteness notice. When supply is insufficient, demand remains visible and a capacity alert explains the deficit.
-
-This prototype does not implement hardware discovery, physical switching, battery charging, duty cycles, inrush, utility tariff blocks, generator startup costs, historical databases or AI inference. Recommendations are explainable deterministic rules. No evidence of real measured savings is implied.
-
-### Selection refinement — October 10
-
-Select a room label in the house (or use the room list) to gently focus that room and see its appliances. Select an appliance to see its reading and share of household power beside the house. “What if this were off?” previews home demand, hourly cost difference and battery-only backup time; “Turn off in demo” applies it. Costs and monitor controls remain available under the detail link. Show whole house returns to the overview.
-
-The Over time screen now has “Explore this chart”, which opens a larger chart with an explanation and a plain-language takeaway. Transitions are brief, manual house interaction interrupts camera movement, and reduced-motion preferences skip camera interpolation. The phone layout scrolls the house away before the details. Dark and light themes remain available.
-
-Validation: TypeScript and production build, eight energy/backup tests, and live Chrome checks of room/device selection, preview/apply/restore, chart expansion, both themes, and a 390 px phone layout.
+Actual meter electronics/drivers, waveform collection, MQTT/Modbus adapters, NILM inference, relay switching, calibrated accuracy, real battery characterization, generator fuel modelling, forecasting, AI recommendations, multi-home tenancy, production user login/session management, token rotation/revocation, operational rate limiting, database retention/backups, and remote deployment. These are explicit boundaries, not claimed capabilities.
