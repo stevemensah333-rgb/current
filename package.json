@@ -9,11 +9,13 @@
     "preview": "vite preview --host 127.0.0.1 --port 5182",
     "test": "node --test tests/*.test.mjs",
     "dev:ui": "vite --host 127.0.0.1 --port 5182 --strictPort",
-    "server": "node server/index.mjs",
+    "server": "node --env-file-if-exists=.env server/index.mjs",
     "simulator": "node scripts/simulator.mjs",
-    "setup:simulator": "node scripts/bootstrap.mjs"
+    "setup:simulator": "node scripts/bootstrap.mjs",
+    "dev:nilm": "node scripts/dev-nilm.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.5.0",
     "@react-three/drei": "9.122.0",
     "@react-three/fiber": "8.18.0",
     "react": "18.3.1",

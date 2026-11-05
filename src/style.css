@@ -9,3 +9,58 @@
 .home-story.screen-enter{animation:home-enter .35s ease-out}
 @keyframes home-enter{from{opacity:0}to{opacity:1}}
 .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+.alert-list{display:grid;gap:8px;margin:0 0 12px}.alert-list p{margin:0}
+.assistant-toggle{display:flex;gap:8px;margin:4px 0}.assistant-toggle button{flex:1}
+.assistant-turns{display:grid;gap:10px;margin:12px 0;max-height:46vh;overflow:auto}.assistant-turn{padding:12px}.assistant-turn p{margin:4px 0}
+.assistant-ask{display:grid;gap:8px}
+
+/* Shorter bottom bar */
+.staged-app{grid-template-rows:76px 83px minmax(0,1fr) 52px}
+@media(max-height:760px) and (min-width:761px){.staged-app{grid-template-rows:64px 73px minmax(0,1fr) 46px}}
+@media(max-width:760px){.staged-app{grid-template-rows:64px 66px minmax(0,1fr) 50px}}
+.stage-footer>.primary{padding:7px 14px}
+/* Collapsible left panel */
+.story-toggle{display:block;margin:0 0 10px auto;font-size:13px}
+.home-story.collapsed{width:auto}
+.home-story.collapsed>*:not(.story-toggle){display:none}
+.home-story.collapsed .story-toggle{margin:0}
+/* Floating, see-through assistant card */
+.float-card{position:fixed;z-index:60;width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;padding:16px 20px 20px;border-radius:16px;
+ background:color-mix(in srgb,var(--surface) 58%,transparent);backdrop-filter:blur(16px) saturate(1.2);-webkit-backdrop-filter:blur(16px) saturate(1.2);
+ border:1px solid color-mix(in srgb,var(--border) 80%,transparent);box-shadow:0 18px 50px rgba(0,0,0,.35)}
+.float-top{display:flex;align-items:center;gap:10px;cursor:grab;touch-action:none;user-select:none;padding-bottom:4px}
+.float-top:active{cursor:grabbing}.float-top .icon-button{margin-left:auto}
+.drag-grip{color:var(--text-tertiary);font-size:14px;letter-spacing:1px}
+.float-card h2{margin:4px 0 10px}
+.float-card .assistant-turn{background:color-mix(in srgb,var(--surface) 70%,transparent)}
+
+/* Device health */
+.health-screen{display:grid;gap:18px}
+.health-intro{display:flex;gap:16px;align-items:flex-start}.health-intro h2{margin:0 0 6px}
+.health-table-wrap{overflow-x:auto;padding:4px}
+.health-table{width:100%;border-collapse:collapse;font-size:14px}
+.health-table th,.health-table td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+.health-table thead th{font-size:12px;font-weight:500;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em}
+.health-table small{display:block;color:var(--text-secondary);font-size:12px;margin-top:3px}
+.health-table td b{font-weight:600}
+.health-table .out-of-range b{color:#e38c47}.health-table .out-of-range svg{color:#e38c47;margin-left:4px;vertical-align:-2px}
+.health-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;border:1px solid var(--border)}
+.health-badge.ok{color:#00ce87}.health-badge.watch{color:#e3b547}.health-badge.alert{color:#e35d47;border-color:#e35d47}
+
+/* No footer: the stage navigation floats on the canvas */
+.staged-app{grid-template-rows:76px 83px minmax(0,1fr)}
+@media(max-height:760px) and (min-width:761px){.staged-app{grid-template-rows:64px 73px minmax(0,1fr)}}
+@media(max-width:760px){.staged-app{grid-template-rows:64px 66px minmax(0,1fr)}}
+.stage-float{position:fixed;right:24px;bottom:20px;z-index:40;display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:999px;
+ background:color-mix(in srgb,var(--surface) 60%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid color-mix(in srgb,var(--border) 80%,transparent)}
+.stage-float .stage-dots{display:flex;gap:6px}
+.stage-float .primary-icon{background:var(--primary);color:var(--on-primary)}
+.stage-float .icon-button:disabled{opacity:.35}
+.icon-text{display:inline-flex;align-items:center;gap:6px}
+.small-action{display:inline-flex;align-items:center;gap:8px;font-size:13px;padding:7px 12px}
+.alert-list .attention{display:flex;align-items:center;gap:8px}.alert-dismiss{margin-left:auto}
+/* The details now live in a floating card; the section only carries the house controls */
+.home-story{width:auto}
+.float-card .home-guidance{max-width:none}
+.health-note{margin:0 0 4px}

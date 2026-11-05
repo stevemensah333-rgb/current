@@ -1,13 +1,15 @@
 import {createServer} from 'node:http'
 import {resolve,dirname} from 'node:path'
+import {mkdirSync} from 'node:fs'
 import {fileURLToPath} from 'node:url'
 import {timingSafeEqual} from 'node:crypto'
 import {openDatabase,localToken,hash,allDevices,config,simulation} from './database.mjs'
 import {realPower} from '../shared/calculations.ts'
 import {createService} from './service.mjs'
 import {ApiError,fail} from './validation.mjs'
-export function createApp({databasePath,ownerToken,clock}={}){
- const db=openDatabase(databasePath),service=createService(db,{clock})
+import {createAssistant} from './assistant.mjs'
+export function createApp({databasePath,ownerToken,clock,assistantProviders}={}){
+ const db=openDatabase(databasePath),service=createService(db,{clock}),assistant=createAssistant(service,{clock,...(assistantProviders?{providers:assistantProviders}:{})})
  const server=createServer(async(req,res)=>{
   res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff')
   const send=(status,data)=>{res.writeHead(status);res.end(JSON.stringify(data))}
@@ -20,14 +22,18 @@ export function createApp({databasePath,ownerToken,clock}={}){
    const gateway=db.prepare('SELECT id,mode FROM gateways WHERE token_hash=?').get(hash(credential))
    const ingestion=path==='/api/v1/readings'&&method==='POST'
    const gatewayConfig=path==='/api/v1/gateway/config'&&method==='GET'
-   if(ingestion||gatewayConfig?!gateway:!owner)fail('Authentication required',401)
+   const alertIngestion=path==='/api/v1/alerts'&&method==='POST'
+   const healthIngestion=path==='/api/v1/health'&&method==='POST'
+   if(ingestion||gatewayConfig||alertIngestion||healthIngestion?!gateway:!owner)fail('Authentication required',401)
    let body={};if(['POST','PATCH','PUT'].includes(method)){
     if(!(req.headers['content-type']||'').startsWith('application/json'))fail('Content-Type must be application/json',415)
     const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>65536)fail('Request body exceeds 64 KiB',413);chunks.push(chunk)}
-    try{body=JSON.parse(Buffer.concat(chunks).toString())}catch{fail('Invalid JSON')}
+    try{const raw=Buffer.concat(chunks).toString();body=raw.trim()?JSON.parse(raw):{}}catch{fail('Invalid JSON')}
    }
    if(gatewayConfig)return send(200,{devices:allDevices(db).filter(d=>d.gateway_id===gateway.id),simulation:gateway.mode==='simulator'?simulation(db):null,settings:gateway.mode==='simulator'?config(db):null})
    if(ingestion)return send(200,service.ingest(body,gateway))
+   if(alertIngestion)return send(200,service.ingestAlert(body,gateway))
+   if(healthIngestion)return send(200,service.ingestHealth(body,gateway))
    if(path==='/api/v1/history'&&method==='GET'){const deviceId=url.searchParams.get('device_id');service.getDevice(deviceId);const rows=db.prepare('SELECT id,payload FROM readings WHERE device_id=? ORDER BY measured_at DESC LIMIT 180').all(deviceId).reverse().map(r=>{const value=JSON.parse(r.payload);return {...value,reported_power_w:value.power_w,power_w:realPower(value).value,power_basis:realPower(value).basis,reading_id:r.id}});return send(200,{device_id:deviceId,readings:rows})}
    if(path==='/api/v1/snapshot'&&method==='GET')return send(200,service.snapshot())
    if(path==='/api/v1/gateways'&&method==='POST')return send(201,service.registerGateway(body))
@@ -36,6 +42,14 @@ export function createApp({databasePath,ownerToken,clock}={}){
    if(path==='/api/v1/plans/preview'&&method==='POST')return send(200,service.previewPlan(body))
    if(path==='/api/v1/insights/context'&&method==='GET')return send(200,service.context())
    if(path==='/api/v1/simulation'&&method==='PATCH')return send(200,service.setSimulation(body))
+   if(path==='/api/v1/assistant'&&method==='POST')return send(202,assistant.start(body))
+   if(path==='/api/v1/assistant/confirm'&&method==='POST')return send(200,assistant.confirm(body))
+   if(path==='/api/v1/assistant/current'&&method==='GET')return send(200,assistant.current())
+   const job=path.match(/^\/api\/v1\/assistant\/([a-f0-9]+)$/)
+   if(job&&method==='GET')return send(200,assistant.view(job[1]))
+   if(job&&method==='DELETE')return send(200,assistant.cancel(job[1]))
+   const ack=path.match(/^\/api\/v1\/alerts\/(\d+)\/ack$/)
+   if(ack&&method==='POST')return send(200,service.ackAlert(Number(ack[1])))
    const match=path.match(/^\/api\/v1\/devices\/([\w-]+)$/)
    if(match&&method==='PATCH')return send(200,service.patchDevice(match[1],body))
    if(match&&method==='DELETE')return send(200,service.retire(match[1]))
@@ -47,7 +61,8 @@ export function createApp({databasePath,ownerToken,clock}={}){
  return {server,db,service}
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- const path=resolve(process.env.APEIRON_DB||'.data/apeiron.sqlite'),ownerToken=process.env.APEIRON_OWNER_TOKEN||localToken(dirname(path),'owner.key')
+ const path=resolve(process.env.APEIRON_DB||'.data/apeiron.sqlite');mkdirSync(dirname(path),{recursive:true,mode:0o700})
+ const ownerToken=process.env.APEIRON_OWNER_TOKEN||localToken(dirname(path),'owner.key')
  const app=createApp({databasePath:path,ownerToken});const port=Number(process.env.APEIRON_PORT||5183)
  app.server.listen(port,'127.0.0.1',()=>console.log(`Apeiron API on http://127.0.0.1:${port}. Local owner credential: ${dirname(path)}/owner.key`))
  const close=()=>app.server.close(()=>{app.db.close();process.exit(0)});process.on('SIGTERM',close);process.on('SIGINT',close)

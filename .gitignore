@@ -6,3 +6,11 @@ dist/
 .env.*
 !.env.example
 .DS_Store
+
+# Python pipeline
+pipeline/.venv/
+__pycache__/
+.pytest_cache/
+pipeline/settings.json
+pipeline/library.json
+pipeline/faults.json

@@ -3,6 +3,7 @@ import {ContactShadows,Edges,Html,Line,OrbitControls} from '@react-three/drei'
 import {createContext,useContext,useEffect,useMemo,useRef} from 'react'
 import * as THREE from 'three'
 import {getFlow,useEnergy} from './store'
+import {powerUnit} from './telemetry'
 import {ROOM_NAMES,SOURCE_COLORS,type Device,type Room} from './energy'
 import type {Theme} from './theme'
 import type {OrbitControls as OrbitControlsImpl} from 'three-stdlib'
@@ -32,9 +33,6 @@ function FlowDot({points,active,color='#00d28a'}:{points:[number,number,number][
  const curve=useMemo(()=>new THREE.CatmullRomCurve3(points.map(p=>new THREE.Vector3(...p))),[points])
  useFrame(({clock})=>{if(ref.current)ref.current.position.copy(curve.getPoint((clock.elapsedTime*.14)%1))})
  return <mesh ref={ref} visible={active}><sphereGeometry args={[.035,8,8]}/><meshBasicMaterial color={color}/></mesh>
-}
-function SolarArray(){
- return <group>{[0,1,2].flatMap(x=>[0,1,2,3].map(z=><group key={`${x}-${z}`} position={[(x-1)*.97,0,(z-1.5)*1.06]}><Block size={[.91,.055,1]} color="#252f3c" edges/>{[-.28,0,.28].map(n=><Block key={n} position={[n,.031,0]} size={[.006,.006,.96]} color="#505b69"/>)}<Block position={[0,.032,0]} size={[.87,.006,.008]} color="#505b69"/></group>))}</group>
 }
 function Gable({z,color}:{z:number;color:string}){
  const shape=useMemo(()=>{const s=new THREE.Shape();s.moveTo(-3.2,2.18);s.lineTo(0,3.27);s.lineTo(3.2,2.18);s.closePath();return s},[])
@@ -71,27 +69,23 @@ function House({roof,heatmap,interactive,onSelect,onRoom,focusRoom,focusDevice}:
  <Block size={[6.42,roof?2.02:.12,.16]} position={[0,roof?1.16:.21,2.34]} color={wall}/><Block size={[.16,roof?2.02:.12,4.7]} position={[3.2,roof?1.16:.21,0]} color={wall}/>
  <Block size={[.12,roof?2:1.1,4.55]} position={[0,roof?1.16:.73,0]} color={wall}/><Block size={[6.25,roof?2:.8,.12]} position={[0,roof?1.16:.58,0]} color={wall}/>
  <Block size={[6.45,.075,.18]} position={[0,2.22,-2.34]} color={trim}/><Block size={[.18,.075,4.7]} position={[-3.2,2.22,0]} color={trim}/>
- {roof&&<group><Gable z={2.28} color={wall}/><Gable z={-2.42} color={wall}/><Block size={[3.56,.12,5.04]} position={[-1.65,2.71,0]} rotation={[0,0,.32]} color="#3d4244"/><Block size={[3.56,.12,5.04]} position={[1.65,2.71,0]} rotation={[0,0,-.32]} color="#3d4244"/><group position={[1.65,2.8,0]} rotation={[0,0,-.32]}><SolarArray/></group>
+ {roof&&<group><Gable z={2.28} color={wall}/><Gable z={-2.42} color={wall}/><Block size={[3.56,.12,5.04]} position={[-1.65,2.71,0]} rotation={[0,0,.32]} color="#3d4244"/><Block size={[3.56,.12,5.04]} position={[1.65,2.71,0]} rotation={[0,0,-.32]} color="#3d4244"/>
  <Block size={[.73,1.67,.04]} position={[-1.96,1.0,2.44]} color="#3b4343"/><Block size={[.043,.17,.04]} position={[-1.7,.94,2.48]} color="#bfc2b8"/>
  {[.6,1.65].map(x=><group key={x}><Block size={[.83,1.02,.035]} position={[x,1.38,2.437]} color="#cfbf8d"/><Block size={[.035,1.1,.045]} position={[x,1.38,2.462]} color="#434b4b"/><Block size={[.9,.035,.045]} position={[x,1.38,2.46]} color="#434b4b"/></group>)}
  </group>}
- {!roof&&<group position={[-.25,.29,-3.45]} scale={.6} rotation={[.16,0,0]}><SolarArray/></group>}
  <Furniture/>
  <Block size={[.25,.49,.19]} position={[0,.47,2.52]} color={light?'#c1c7c4':'#646d6b'}/>
  {devices.map(d=>{const p=positions[d.id]||[-1.55,.22,1.15] as [number,number,number],active=d.on&&d.online,isSelected=focusDevice===d.id;const wire:[number,number,number][]=[[0,.16,2.54],[0,.16,p[2]],[p[0],.16,p[2]]];return <group key={d.id}>
  {!roof&&<><Line points={wire} color={!d.online?'#e38c47':active?'#00bd82':'#70746e'} lineWidth={isSelected?1.3:.7} transparent opacity={active?.6:.18}/><FlowDot points={wire} active={active}/></>}
  <group position={p} onClick={e=>{e.stopPropagation();if(interactive&&!roof)onSelect(d.id)}}><Appliance d={d}/>{isSelected&&!roof&&<mesh rotation={[-Math.PI/2,0,0]} position={[0,-p[1]+.15,0]}><ringGeometry args={[.37,.392,48]}/><meshBasicMaterial color="#00ce87" transparent opacity={.7}/></mesh>}</group>
- {interactive&&!roof&&<Html position={[p[0],p[1]+(d.kind==='fridge'?1.6:d.kind==='lights'?1.35:d.kind==='ac'?1.6:.9),p[2]]} center zIndexRange={[10,0]}><button className={`node-label ${isSelected?'selected':''} ${!d.online?'stale':''}`} onClick={()=>onSelect(d.id)} aria-label={`Select ${d.name}`}><i style={{background:!d.online?'#e38c47':active?'#00ce87':'#7d8583'}}/><span>{d.name}</span><b>{d.online?`${d.reading} watts`:'No reading'}</b></button></Html>}
+ {interactive&&!roof&&<Html position={[p[0],p[1]+(d.kind==='fridge'?1.6:d.kind==='lights'?1.35:d.kind==='ac'?1.6:.9),p[2]]} center zIndexRange={[10,0]}><button className={`node-label ${isSelected?'selected':''} ${!d.online?'stale':''}`} onClick={()=>onSelect(d.id)} aria-label={`Select ${d.name}`}><i style={{background:!d.online?'#e38c47':active?'#00ce87':'#7d8583'}}/><span>{d.name}</span><b>{d.online?`${d.reading} ${powerUnit(s.telemetry).short==='VA'?'VA':'watts'}`:'No reading'}</b></button></Html>}
  </group>})}
- {/* Neutral home battery, utility connection and standby generator. */}
- <Block size={[.19,1.12,.74]} position={[-3.46,.7,-1.35]} color={light?'#eceeeb':'#c4ccc8'}/><Block size={[.024,.42,.015]} position={[-3.57,.78,-.99]} color="#00ce87"/>
+ {/* Utility connection and standby generator. */}
  <Block size={[.06,2.1,.06]} position={[4.48,1.01,-1.6]} color={light?'#a3aaa7':'#737c77'}/><Block size={[.71,.06,.08]} position={[4.48,2.03,-1.6]} color={light?'#a3aaa7':'#737c77'}/><Block size={[.23,.39,.16]} position={[4.48,1.45,-1.6]} color={light?'#c6ccc7':'#727d76'}/>
  <Block size={[.76,.48,.56]} position={[4.01,.4,1.8]} color={light?'#89968e':'#59685e'}/><Block size={[.55,.27,.022]} position={[4.01,.42,2.097]} color="#272f2d"/>{[-.18,0,.18].map(x=><Block key={x} size={[.015,.22,.025]} position={[4.01+x,.43,2.114]} color="#6d7771"/>)}
  {interactive&&!focusRoom&&!focusDevice&&<>
- <Html position={roof?[.2,3.35,-.55]:[-.25,.35,-3.83]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.solar}}/><b>{data?.sources.solar==null?'Unknown':`${Math.round(data.sources.solar).toLocaleString()} W`}</b><span>Solar</span></div></Html>
- <Html position={[-4.05,.21,1.7]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.battery}}/><b>{data?.battery_soc_pct==null?'Charge unknown':`${data.battery_soc_pct.toFixed(0)}% charged`}</b><span>Battery · {data?.sources.battery==null?'power unknown':`${Math.round(data.sources.battery)} W`}</span></div></Html>
  {data?.sources.generator!=null&&data.sources.generator>0&&<Html position={[4.1,.95,2.35]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.generator}}/><b>{Math.round(flow.generator).toLocaleString()} W</b><span>Generator</span></div></Html>}
- <Html position={[4.45,.12,-1.7]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.grid}}/><b>{data?.sources.grid==null?'Unknown':`${Math.round(data.sources.grid).toLocaleString()} W`}</b><span>Grid meter</span></div></Html>
+ <Html position={[4.45,.12,-1.7]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.grid}}/><b>{data?.sources.grid!=null?`${Math.round(data.sources.grid).toLocaleString()} W`:data?.demand_w!=null&&data.demand_scope==='whole_home'?`${Math.round(data.demand_w).toLocaleString()} ${powerUnit(data).short}`:'Unknown'}</b><span>{data?.sources.grid!=null?'Grid meter':'Mains clamp'}</span></div></Html>
  </>}
  </group>
 }

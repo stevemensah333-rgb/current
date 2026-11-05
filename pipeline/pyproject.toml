@@ -1,0 +1,19 @@
+[project]
+name = "smart-home-power"
+version = "0.1.0"
+description = "Names home appliances from one clamp sensor's current."
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.5.4",
+    "pyserial>=3.5",
+    "timee-ts>=0.1.1",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["real: uses the real TimEE or LFM3 model (slow); run with  uv run pytest -m real"]
+addopts = "-m 'not real'"

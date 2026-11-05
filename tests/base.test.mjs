@@ -41,7 +41,7 @@ test('backup calculator enforces reserve, power limits and missing data',()=>{
 test('planning uses backend evidence, excludes inferred loads and does not claim a budget result',()=>{const f=fixture();try{register(f,'ac');register(f,'battery','battery');ingest(f,reading(f,'ac',0,{power_w:500}));ingest(f,reading(f,'battery',0,{power_w:500,battery_soc_pct:70}));f.service.updateSettings({battery:{capacity_kwh:5,reserve_pct:20,efficiency:.9,max_discharge_w:2000}});const p=f.service.previewPlan({selected_ids:['ac'],target_hours:6,budget_ghs:20});assert.equal(p.runtime_hours,4.5);assert.equal(p.target_feasible,false);assert.equal(p.budget_status,'not_evaluated');assert.equal(p.execution,'advisory_only');assert.equal(f.service.snapshot().devices.find(d=>d.id==='ac').power_w,500);assert.equal(f.service.context().recommendations.length,0);assert.equal(f.service.context().constraints.commands_allowed,false)}finally{f.close()}})
 test('retirement preserves history and removes a channel from live aggregation',()=>{const f=fixture();try{register(f,'ac');ingest(f,reading(f,'ac'));f.service.retire('ac');assert.equal(f.service.snapshot().devices.length,0);assert.equal(f.db.prepare('SELECT count(*) AS n FROM readings').get().n,1)}finally{f.close()}})
 
-test('HTTP integration enforces auth, serves stored telemetry, and keeps commands and AI disabled',async()=>{
+test('HTTP integration enforces auth, serves stored telemetry, keeps commands disabled and names the assistant provider',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'apeiron-http-')),app=createApp({databasePath:join(dir,'db.sqlite'),ownerToken:'test-owner-token'});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${app.server.address().port}`
  async function request(path,method='GET',body,token='test-owner-token',extra={}){const r=await fetch(base+'/api/v1'+path,{method,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...extra},body:body===undefined?undefined:JSON.stringify(body)});return {status:r.status,data:await r.json()}}
  try{
@@ -57,7 +57,7 @@ test('HTTP integration enforces auth, serves stored telemetry, and keeps command
   assert.equal((await request('/snapshot')).data.demand_w,250)
   assert.equal((await request('/snapshot','GET',undefined,g.data.token)).status,401)
   assert.equal((await request('/devices/real-ac/commands','POST',{on:false})).status,501)
-  const ctx=(await request('/insights/context')).data;assert.equal(ctx.evidence.ai.enabled,false);assert.deepEqual(ctx.recommendations,[])
+  const ctx=(await request('/insights/context')).data;assert.equal(ctx.evidence.ai.enabled,true);assert.equal(ctx.evidence.ai.provider,'local');assert.deepEqual(ctx.recommendations,[])
   assert.equal((await request('/devices/real-ac','DELETE')).status,200)
   assert.equal((await request('/readings','POST',{...r,message_id:'after-retire'},g.data.token)).status,404)
  }finally{await new Promise(r=>app.server.close(r));app.db.close();rmSync(dir,{recursive:true,force:true})}

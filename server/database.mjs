@@ -12,13 +12,15 @@ export function openDatabase(filename){
  CREATE UNIQUE INDEX IF NOT EXISTS reading_sequence ON readings(device_id,boot_id,sequence) WHERE sequence IS NOT NULL;
  CREATE INDEX IF NOT EXISTS readings_device_time ON readings(device_id,measured_at);
  CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS simulation(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL);`)
+ CREATE TABLE IF NOT EXISTS simulation(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS device_health(device_id TEXT PRIMARY KEY REFERENCES devices(id),gateway_id TEXT NOT NULL,message_id TEXT NOT NULL,payload TEXT NOT NULL,checked_at TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS alerts(id INTEGER PRIMARY KEY,gateway_id TEXT NOT NULL,message_id TEXT NOT NULL,payload TEXT NOT NULL,payload_hash TEXT NOT NULL,raised_at TEXT NOT NULL,acked_at TEXT,UNIQUE(gateway_id,message_id));`)
  db.prepare('INSERT OR IGNORE INTO settings VALUES(1,?)').run(JSON.stringify({battery:{capacity_kwh:null,reserve_pct:20,efficiency:.9,max_discharge_w:null},rates:{grid:null,generator:null,battery:null},currency:'GHS',stale_after_s:15,max_integration_gap_s:30}))
  db.prepare('INSERT OR IGNORE INTO simulation VALUES(1,?)').run(JSON.stringify({enabled:false,paused:false,scenario:'day',states:{},offline_ids:[],soc:72}))
  return db
 }
 export function localToken(directory,name){const path=join(directory,name);if(!existsSync(path))writeFileSync(path,randomBytes(32).toString('hex'),{mode:0o600});chmodSync(path,0o600);return readFileSync(path,'utf8').trim()}
-export function config(db){return JSON.parse(db.prepare('SELECT payload FROM settings WHERE id=1').get().payload)}
+export function config(db){const c=JSON.parse(db.prepare('SELECT payload FROM settings WHERE id=1').get().payload);c.assistant??={provider:'local'};return c}
 export function simulation(db){return JSON.parse(db.prepare('SELECT payload FROM simulation WHERE id=1').get().payload)}
 export function allDevices(db){return db.prepare('SELECT metadata FROM devices WHERE active=1 ORDER BY id').all().map(d=>JSON.parse(d.metadata))}
 export function putDevice(db,d){db.prepare('INSERT INTO devices(id,gateway_id,metadata) VALUES(?,?,?)').run(d.id,d.gateway_id,JSON.stringify(d))}

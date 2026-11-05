@@ -1,11 +1,15 @@
 /** Pure, deterministic calculations. No network, state, AI or device commands. */
-export type NumericReading = { measured_at:string; boot_id:string; power_w:number|null; energy_total_wh:number|null }
-export function realPower(input:{power_w?:number|null;voltage_v?:number|null;current_a?:number|null;power_factor?:number|null}) {
- if(input.power_w!=null)return {value:input.power_w,basis:'reported' as const}
+export type PowerBasis='reported'|'calculated_from_voltage_current_pf'|'apparent_estimate_va'|'unavailable'
+export type NumericReading = { measured_at:string; boot_id:string; power_w:number|null; energy_total_wh:number|null; basis?:PowerBasis }
+export function realPower(input:{power_w?:number|null;voltage_v?:number|null;current_a?:number|null;power_factor?:number|null;apparent_power_va?:number|null}):{value:number|null;basis:PowerBasis} {
+ if(input.power_w!=null)return {value:input.power_w,basis:'reported'}
  if(input.voltage_v!=null&&input.current_a!=null&&input.power_factor!=null)
-  return {value:input.voltage_v*input.current_a*input.power_factor,basis:'calculated_from_voltage_current_pf' as const}
- return {value:null,basis:'unavailable' as const}
+  return {value:input.voltage_v*input.current_a*input.power_factor,basis:'calculated_from_voltage_current_pf'}
+ // Apparent power (VA) from a current-only meter at nominal voltage. A stand-in for watts, never presented as watts.
+ if(input.apparent_power_va!=null)return {value:input.apparent_power_va,basis:'apparent_estimate_va'}
+ return {value:null,basis:'unavailable'}
 }
+export const isApparent=(basis:string|null|undefined)=>basis==='apparent_estimate_va'||basis==='integrated_apparent_va'
 export function energyBetween(a:NumericReading,b:NumericReading,maxGapSeconds:number){
  const seconds=(Date.parse(b.measured_at)-Date.parse(a.measured_at))/1000
  if(seconds<=0)return {wh:0,basis:'none',gap:false}
@@ -18,7 +22,8 @@ export function energyBetween(a:NumericReading,b:NumericReading,maxGapSeconds:nu
  // Consumers and production channels use positive magnitudes. Signed battery/grid
  // channels must use separate import/export counters for exact directional energy.
  if(a.power_w<0||b.power_w<0)return {wh:0,basis:'unknown_direction',gap:true}
- return {wh:(a.power_w+b.power_w)/2*seconds/3600,basis:'integrated_power',gap:false}
+ const apparent=a.basis==='apparent_estimate_va'||b.basis==='apparent_estimate_va'
+ return {wh:(a.power_w+b.power_w)/2*seconds/3600,basis:apparent?'integrated_apparent_va':'integrated_power',gap:false}
 }
 export type BatteryConfig={capacity_kwh:number|null;reserve_pct:number;efficiency:number;max_discharge_w:number|null}
 export function backupEstimate(loadW:number|null,soc:number|null,config:BatteryConfig){
