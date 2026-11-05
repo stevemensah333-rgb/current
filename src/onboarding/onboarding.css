@@ -1,0 +1,157 @@
+/* Onboarding preview. Every colour comes from the app theme (src/theme.css), in light and dark. */
+.ob-screen{
+ position:fixed;inset:0;z-index:200;background:var(--page);color:var(--text);display:flex;justify-content:center;overflow:hidden;
+ --art-line:var(--text-secondary);--art-bg:var(--surface-raised);--art-paper:var(--surface);
+ --art-fill:var(--surface-hover);--art-fill-2:var(--border);--art-strong:var(--text-tertiary);
+ --art-accent:var(--green);--art-accent-soft:color-mix(in srgb,var(--green) 28%,var(--surface));--art-on-accent:var(--page);
+ --art-glow:color-mix(in srgb,var(--yellow) 55%,var(--surface));--art-warn:var(--yellow);
+ --art-cool:var(--accent);--art-cool-soft:color-mix(in srgb,var(--accent) 28%,var(--surface));
+ --art-mid:var(--border);--art-mid-2:var(--text-tertiary);--art-dark:var(--page);--art-dark-2:var(--surface-hover);
+ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif
+}
+.ob-screen *{box-sizing:border-box}
+.ob-screen button{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ob-art{display:block}.ob-art svg{display:block;width:100%;height:auto}
+
+.ob{width:min(560px,100%);height:100%;display:flex;flex-direction:column;padding:24px 16px 20px}
+.ob-bar{display:flex;gap:4px}.ob-bar i{flex:1;height:3px;border-radius:2px;background:var(--border);transition:background .4s}.ob-bar i.on{background:var(--green)}
+.ob-stage{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;align-items:center;justify-content:safe center;gap:20px;padding:20px 0;text-align:center}
+.ob-stage.enter{animation:ob-enter .3s cubic-bezier(.2,.8,.2,1)}
+@keyframes ob-enter{from{opacity:0;transform:translateY(8px)}}
+.ob-copy{max-width:400px}
+.ob-copy h1{margin:0 0 6px;font-size:22px;font-weight:600;letter-spacing:-.01em}
+.ob-copy p{margin:0;font-size:14px;line-height:1.5;color:var(--text-secondary)}
+
+.ob-foot{display:flex;align-items:center;justify-content:space-between;padding-top:12px;border-top:1px solid var(--border)}
+.ob-round{width:44px;height:44px;border-radius:6px;border:1px solid var(--border);background:var(--surface);display:grid;place-items:center;transition:background .15s}
+.ob-round:hover{background:var(--surface-hover)}
+.ob-round svg{width:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.ob-go{width:64px;background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+.ob-go:hover{background:var(--primary);opacity:.9}
+.ob-go.finish svg{transform:rotate(-90deg)}
+
+/* Pictures stay small and centred; the words carry the meaning. */
+.ob-hero{width:200px}
+.ob-scene{width:min(340px,100%);padding:14px;border-radius:10px;background:var(--surface);border:1px solid var(--border)}
+.ob-pips{display:flex;gap:6px}.ob-pips button{width:8px;height:8px;padding:0;border-radius:4px;border:0;background:var(--border)}.ob-pips button.on{background:var(--green);width:20px}
+
+.ob-grid{display:grid;gap:10px;width:100%;max-width:480px;margin:0 auto}
+.ob-grid.homes,.ob-grid.apps{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:480px){.ob-grid.homes{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.ob-tile{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 8px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;transition:border-color .2s,background .2s}
+.ob-tile:hover{background:var(--surface-hover)}
+.ob-tile svg{width:64px}
+.ob-grid.homes .ob-tile svg{width:76px}
+.ob-tile.sel{border-color:var(--green);box-shadow:inset 0 0 0 1px var(--green)}
+.ob-tile span{font-size:13px;font-weight:600}
+.ob-tile em{font-style:normal;font-size:11px;color:var(--text-secondary)}
+
+.ob-plan{width:100%;max-width:480px;min-height:150px;max-height:36vh;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,64px);grid-auto-rows:64px;grid-auto-flow:dense;justify-content:center;align-content:center;gap:6px;padding:10px;border-radius:10px;background:var(--surface);border:1px dashed var(--border)}
+.ob-room{position:relative;padding:0;border:0;background:none}
+.ob-room svg{width:100%;height:100%}
+.ob-room.big{grid-column:span 2;grid-row:span 2}
+.ob-room.pop{animation:ob-pop .35s cubic-bezier(.3,1.5,.5,1)}
+.ob-room i{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:var(--text);color:var(--page);font-style:normal;display:grid;place-items:center;font-size:14px;opacity:0;transition:opacity .2s}
+.ob-room:hover i,.ob-room:focus-visible i{opacity:1}
+@media(hover:none){.ob-room i{opacity:.8}}
+.ob-palette{display:flex;gap:8px;justify-content:safe center;overflow-x:auto;width:100%;padding:4px 2px}
+.ob-add{flex:0 0 60px;position:relative;border:0;background:none;padding:0;display:flex;flex-direction:column;align-items:center;gap:4px}
+.ob-add svg{width:48px;height:48px}
+.ob-add b{position:absolute;top:-4px;right:2px;width:18px;height:18px;border-radius:50%;background:var(--green);color:var(--art-on-accent);display:grid;place-items:center;font-size:13px}
+.ob-add span{font-size:11px;color:var(--text-secondary)}
+.ob-add:active{transform:scale(.94)}
+@keyframes ob-pop{from{transform:scale(.5);opacity:0}}
+
+.ob-summary{display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap}
+.sum-home{width:64px}.sum-rooms{width:40px;position:relative}.sum-rooms b{position:absolute;top:-6px;right:-8px;background:var(--green);color:var(--art-on-accent);border-radius:999px;padding:1px 6px;font-size:11px}
+.sum-apps{display:flex;gap:4px}.sum-apps .art{width:32px}
+
+/* Appliances come alive when on */
+.art .fx{opacity:0;transition:opacity .3s}.art.on .fx{opacity:1}
+.art.on .led{fill:var(--green)}
+.art.on .blades{animation:ob-spin .7s linear infinite;transform-origin:60px 44px}
+.art.on .steam{animation:ob-rise 1.6s ease-in-out infinite}
+.art.on .air path{stroke-dasharray:6 6;animation:ob-flow 1s linear infinite}
+.art.on .drop{animation:ob-drop 1.2s ease-in infinite}
+.art.on .screen{fill:var(--art-cool-soft)}
+.art.on .bulb{fill:var(--art-glow)}
+.art.on .halo,.art.on .cold{animation:ob-breathe 2s ease-in-out infinite}
+@keyframes ob-spin{to{transform:rotate(360deg)}}
+@keyframes ob-rise{0%{transform:translateY(6px);opacity:0}50%{opacity:1}100%{transform:translateY(-8px);opacity:0}}
+@keyframes ob-flow{to{stroke-dashoffset:-24}}
+@keyframes ob-drop{0%{transform:translateY(0);opacity:1}100%{transform:translateY(30px);opacity:0}}
+@keyframes ob-breathe{50%{opacity:.4}}
+
+.ob-tile.sel .win{fill:var(--art-glow);transition:fill .4s}
+.ob-tile .smoke{opacity:0}.ob-tile.sel .smoke{opacity:1;animation:ob-rise 2.4s ease-in-out infinite}
+
+/* Scenes play when shown and when tapped */
+.ob-hero .sun{animation:ob-bob 4s ease-in-out infinite;transform-origin:250px 52px}
+.ob-hero.play .heart{animation:ob-beat .9s ease-in-out 2;transform-origin:160px 108px}
+@keyframes ob-bob{50%{transform:translateY(-6px)}}
+@keyframes ob-beat{30%{transform:scale(1.2)}60%{transform:scale(.95)}}
+.ob-scene .mini .fx{opacity:0}
+.live.play .r1 rect{animation:ob-glow 3s .2s forwards}.live.play .r2 rect{animation:ob-glow 3s .8s forwards}.live.play .r3 rect{animation:ob-glow 3s 1.4s forwards}
+.live.play .mini .fx{animation:ob-show 3s 1s forwards}
+.live .badge{opacity:0}.live.play .badge{animation:ob-popin .5s 1.8s cubic-bezier(.3,1.5,.5,1) forwards;transform-origin:256px 39px}
+@keyframes ob-glow{to{opacity:.5}}
+@keyframes ob-show{to{opacity:1}}
+@keyframes ob-popin{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
+.ask .b1,.ask .dots,.ask .b2{opacity:0}
+.ask.play .b1{animation:ob-popin .4s .1s cubic-bezier(.3,1.5,.5,1) forwards;transform-origin:296px 46px}
+.ask.play .dots{animation:ob-typing 1.2s .6s forwards}
+.ask.play .b2{animation:ob-popin .45s 1.8s cubic-bezier(.3,1.5,.5,1) forwards;transform-origin:30px 128px}
+@keyframes ob-typing{0%,90%{opacity:1}100%{opacity:0}}
+.heads_up .pulse{opacity:0}.heads_up.play .pulse{animation:ob-popin .5s .3s cubic-bezier(.3,1.5,.5,1) forwards;transform-origin:168px 52px}
+.heads_up.play .bell{animation:ob-ring .9s .8s ease-in-out 2}
+@keyframes ob-ring{20%{transform:rotate(14deg)}40%{transform:rotate(-12deg)}60%{transform:rotate(8deg)}80%{transform:rotate(-4deg)}}
+.teach.play .ring{animation:ob-fill 2.4s .2s steps(3,end) forwards}
+.teach.play .mini .fx{animation:ob-show 2.4s .2s forwards}
+.teach .check{opacity:0}.teach.play .check{animation:ob-popin .5s 2.6s cubic-bezier(.3,1.5,.5,1) forwards;transform-origin:232px 40px}
+@keyframes ob-fill{to{stroke-dashoffset:0}}
+.done .confetti rect{opacity:0}.done.play .confetti rect{animation:ob-fall 1.6s ease-out forwards}
+.done.play .confetti rect:nth-child(2n){animation-delay:.15s}.done.play .confetti rect:nth-child(3n){animation-delay:.3s}
+.done .badge{opacity:0}.done.play .badge{animation:ob-popin .5s .5s cubic-bezier(.3,1.5,.5,1) forwards;transform-origin:232px 74px}
+@keyframes ob-fall{from{opacity:1;transform:translateY(-30px)}to{opacity:1;transform:translateY(0)}}
+
+.ob-screen button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition:none!important}}
+
+/* Wider while building, so the house has room */
+.ob.wide{width:min(760px,100%)}
+.ob-hero,.ob-scene{border:0;background:none;padding:0}
+.ob-scene{padding:14px;background:var(--surface);border:1px solid var(--border)}
+.ob-types{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.ob-type{display:flex;align-items:center;gap:8px;padding:6px 12px 6px 6px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:13px;font-weight:600}
+.ob-type .ob-art{width:40px}
+.ob-type.sel{border-color:var(--green);box-shadow:inset 0 0 0 1px var(--green)}
+.ob-type.sel .win{fill:var(--art-glow)}
+.ob-house{width:100%;height:clamp(220px,40vh,380px);border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+.ob-house .room-label{border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:6px;padding:5px 9px;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer}
+.ob-house .room-label.active{border-color:var(--green);color:var(--green)}
+.ob-tools,.ob-chips{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;min-height:64px}
+.ob-tool{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:56px;padding:8px 6px;border-radius:8px;border:1px solid var(--border);background:var(--surface)}
+.ob-tool small{font-size:11px;color:var(--text-secondary)}
+.ob-tool:disabled,.ob-chip:disabled{opacity:.4;cursor:not-allowed}
+.ob-rename{display:flex;gap:6px;align-items:center}
+.ob-rename input{height:44px;padding:0 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;width:200px}
+.ob-chip{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;width:64px;border:0;background:none;padding:0}
+.ob-chip .ob-art{width:44px}
+.ob-chip b{position:absolute;top:-4px;right:6px;width:18px;height:18px;border-radius:50%;background:var(--green);color:var(--art-on-accent);display:grid;place-items:center;font-size:13px}
+.ob-chip span{font-size:11px;color:var(--text-secondary)}
+.ob-go.finish{width:auto;padding:0 16px;gap:8px;display:flex}
+.ob-go.finish svg{transform:none}
+.ob-tile .ob-art{width:64px}
+.sum-home{width:64px}.sum-apps .ob-art{width:32px}
+.ob-screen .ob-go{color:var(--on-primary)}
+.ob-floors{display:flex;gap:6px;justify-content:center;flex-wrap:wrap}
+.ob-floor{display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:999px;background:var(--surface);font-size:13px;font-weight:600}
+.ob-floor button{border:0;background:none;padding:6px 12px}
+.ob-floor.sel{border-color:var(--green);color:var(--green)}
+.ob-floor .ob-floor-x{padding:6px 10px 6px 0;color:var(--text-secondary)}
+.ob-floor-add{padding:6px 12px;gap:4px;color:var(--text-secondary)}
+.ob-size{display:grid;grid-template-columns:32px auto 32px;grid-template-rows:auto auto;align-items:center;column-gap:4px;padding:6px 6px 4px;border-radius:8px;border:1px solid var(--border);background:var(--surface)}
+.ob-size button{width:32px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--surface-raised);font-size:16px;line-height:1;padding:0}
+.ob-size button:disabled{opacity:.4;cursor:not-allowed}
+.ob-size span{display:flex;gap:3px}.ob-size i{width:8px;height:8px;border-radius:2px;background:var(--border)}.ob-size i.on{background:var(--green)}
+.ob-size small{grid-column:1/-1;text-align:center;font-size:11px;color:var(--text-secondary);margin-top:2px}

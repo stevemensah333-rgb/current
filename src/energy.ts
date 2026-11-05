@@ -1,8 +1,8 @@
-export type Room = 'Living room' | 'Kitchen' | 'Bedroom' | 'Office'
+/** A room is named by the home layout the user builds (src/home/layout.ts). */
+export type Room = string
 export type Scenario = 'day' | 'outage' | 'night' | 'generator'
 export type Device = { id: string; monitorId: string; name: string; kind: string; room: Room; watts: number; critical: boolean; on: boolean; online: boolean; reading: number; energy: number; cost: number }
 export type Rates = { grid: number; generator: number; battery: number }
-export const ROOM_NAMES: Room[] = ['Living room', 'Kitchen', 'Bedroom', 'Office']
 export const SOURCE_COLORS = { solar:'var(--yellow)', grid:'var(--grid-color)', battery:'var(--green)', generator:'var(--generator-color)' }
 export const SCENARIOS: Record<Scenario, {name:string;time:string;solar:number;grid:boolean;generator:boolean;description:string}> = {
  day:{name:'Sunny afternoon',time:'14:00',solar:1050,grid:true,generator:false,description:'Solar first. Grid supplies the remaining demand.'},

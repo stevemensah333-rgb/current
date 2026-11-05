@@ -19,6 +19,13 @@ function noticed(h:Health):string[]{
  return out
 }
 
+/** Today, Yesterday, or a day-month date (Ghana writes dates day first). */
+function dayLabel(iso:string){
+ const d=new Date(iso),start=(x:Date)=>new Date(x.getFullYear(),x.getMonth(),x.getDate()).getTime()
+ const days=Math.round((start(new Date())-start(d))/86400000)
+ return days===0?'Today':days===1?'Yesterday':d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:d.getFullYear()===new Date().getFullYear()?undefined:'numeric'})
+}
+
 /** One row per taught device: its latest switch-on compared with how it behaved when it was taught. */
 export function DeviceHealth(){
  const t=useEnergy(s=>s.telemetry)
@@ -27,7 +34,7 @@ export function DeviceHealth(){
  return <div className="screen-content health-screen">
   <div className="health-intro"><Icon name="pulse" size={26}/><div>
    <p className="muted">Every time a device switches on, we compare it with how it behaved when you taught it. A slow change can warn of a fault before the device fails.</p></div></div>
-  {!devices.length?<p className="empty">No taught devices yet. Teach a device with the pipeline, then it appears here.</p>:
+  {!devices.length?<p className="empty">No appliances named yet. Name one in teach mode: switch it on and off a few times while the app listens. It then appears here.</p>:
   <div className="panel health-table-wrap"><table className="health-table">
    <thead><tr><th>Device</th><th>Status</th><th>What we noticed</th><th>Last check</th></tr></thead>
    <tbody>{devices.map(d=>{const h=health.get(d.id) as Health|undefined
@@ -35,10 +42,10 @@ export function DeviceHealth(){
     const st=STATUS[h.status],notes=noticed(h)
     return <tr key={d.id} className={`health-${h.status}`}>
      <th scope="row">{d.name}<small>{d.room}</small></th>
-     <td><span className={`health-badge ${h.status}`}><Icon name={st.icon} size={15}/>{st.label}</span></td>
-     <td>{notes.length?notes.map(n=><p key={n} className="health-note">{n}</p>):<p className="health-note">Working as usual.</p>}
+     <td data-label="Status"><span className={`health-badge ${h.status}`}><Icon name={st.icon} size={15}/>{st.label}</span></td>
+     <td data-label="What we noticed">{notes.length?notes.map(n=><p key={n} className="health-note">{n}</p>):<p className="health-note">Working as usual.</p>}
       {h.days_outside>1&&<small>For {h.days_outside} days in a row.</small>}</td>
-     <td><b>{new Date(h.checked_at).toLocaleDateString()}</b><small>{h.samples} switch-on{h.samples>1?'s':''} that day</small></td>
+     <td data-label="Last check"><b>{dayLabel(h.checked_at)}</b><small>{h.samples} switch-on{h.samples>1?'s':''} that day</small></td>
     </tr>})}</tbody>
   </table></div>}
  </div>

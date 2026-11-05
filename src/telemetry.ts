@@ -17,11 +17,11 @@ export async function api<T>(path:string,method='GET',body?:unknown):Promise<T>{
 }
 export const watts=(value:number|null|undefined)=>value==null?'Unavailable':`${Math.round(value).toLocaleString()} W`
 // Apparent power (VA, from current at 230 V) is never shown as watts.
-export const powerLabel=(value:number|null|undefined,basis?:string|null)=>value==null?'Unavailable':isApparent(basis)?`≈ ${Math.round(value).toLocaleString()} VA (estimated)`:watts(value)
+export const powerLabel=(value:number|null|undefined,basis?:string|null)=>value==null?'Unavailable':isApparent(basis)?`${Math.round(value).toLocaleString()} VA`:watts(value)
 // The unit for whole-home figures, from how the home total is measured. Single channels use powerLabel with their own basis.
-export const powerUnit=(t:Snapshot|null)=>isApparent(t?.demand_basis)?{long:'VA (estimated)',short:'VA'}:{long:'watts',short:'W'}
+export const powerUnit=(t:Snapshot|null)=>isApparent(t?.demand_basis)?{long:'VA',short:'VA'}:{long:'watts',short:'W'}
 /** Energy in kWh, or kVAh (estimated) when it was integrated from apparent power. */
-export const energyLabel=(wh:number|null|undefined,methods:string[]=[])=>wh==null?'Unavailable':`${(wh/1000).toFixed(3)} ${methods.some(isApparent)?'kVAh (estimated)':'kWh'}`
+export const energyLabel=(wh:number|null|undefined,methods:string[]=[])=>wh==null?'Unavailable':`${(wh/1000).toFixed(2)} ${methods.some(isApparent)?'kVAh':'kWh'}`
 const VALUE_NAMES={shape_diff:'shape',surge_peak:'switch-on surge',settle_ms:'settling time'}
 /** The app, not the gateway, writes every alert sentence. */
 export function alertText(a:Alert,name:(id:string)=>string){

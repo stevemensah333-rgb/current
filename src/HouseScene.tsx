@@ -4,13 +4,12 @@ import {createContext,useContext,useEffect,useMemo,useRef} from 'react'
 import * as THREE from 'three'
 import {getFlow,useEnergy} from './store'
 import {powerUnit} from './telemetry'
-import {ROOM_NAMES,SOURCE_COLORS,type Device,type Room} from './energy'
+import {SOURCE_COLORS,type Device,type Room} from './energy'
+import {CELL_D,FLOOR_H,pack,useHome,type Layout,type Placed} from './home/layout'
 import type {Theme} from './theme'
 import type {OrbitControls as OrbitControlsImpl} from 'three-stdlib'
 
 const ThemeContext=createContext<Theme>('dark')
-const centers:Record<Room,[number,number,number]>={'Living room':[-1.55,.14,1.15],Kitchen:[1.55,.14,1.15],Bedroom:[-1.55,.14,-1.15],Office:[1.55,.14,-1.15]}
-const placements:Record<string,[number,number,number]>={ac:[-2.7,.3,.8],tv:[-.65,.22,.85],fridge:[2.55,.22,.45],kettle:[1.1,.8,1.8],lights:[-2.5,.22,-1.5],fan:[-.9,.2,-1.3],router:[.75,.95,-1.65],laptop:[1.9,.2,-1.25]}
 function Block({position=[0,0,0],size,color,rotation=[0,0,0],edges=false}:{position?:[number,number,number];size:[number,number,number];color?:string;rotation?:[number,number,number];edges?:boolean}) {
  const theme=useContext(ThemeContext)
  return <mesh position={position} rotation={rotation} castShadow receiveShadow><boxGeometry args={size}/><meshStandardMaterial color={color|| (theme==='dark'?'#55585a':'#d6d7d3')} roughness={.68} metalness={.12}/>{edges&&<Edges color={theme==='dark'?'#66696b':'#b6b9b7'} threshold={25}/>}</mesh>
@@ -38,79 +37,127 @@ function Gable({z,color}:{z:number;color:string}){
  const shape=useMemo(()=>{const s=new THREE.Shape();s.moveTo(-3.2,2.18);s.lineTo(0,3.27);s.lineTo(3.2,2.18);s.closePath();return s},[])
  return <mesh position={[0,0,z]} castShadow receiveShadow><extrudeGeometry args={[shape,{depth:.14,bevelEnabled:false}]}/><meshStandardMaterial color={color} roughness={.7}/></mesh>
 }
-function Furniture(){
- const light=useContext(ThemeContext)==='light',fabric=light?'#b0b8b2':'#596561',wood=light?'#a39177':'#776955'
- return <group>
- {/* Living room sofa and a low coffee table. */}
- <Block size={[1.45,.38,.66]} position={[-1.75,.43,1.85]} color={fabric}/><Block size={[1.45,.48,.13]} position={[-1.75,.8,2.11]} color={fabric}/>{[-2.49,-1.01].map(x=><Block key={x} size={[.12,.46,.73]} position={[x,.62,1.85]} color={fabric}/>)}
- <Block size={[.83,.07,.5]} position={[-1.76,.51,.85]} color={wood}/>{[-2.08,-1.44].map(x=><Block key={x} size={[.04,.27,.34]} position={[x,.33,.85]} color="#545a5a"/>)}
- {/* Kitchen cabinets and a counter supporting the kettle. */}
- <Block size={[1.45,.59,.57]} position={[1.33,.49,1.82]} color={light?'#d1d4cc':'#657064'}/><Block size={[1.57,.08,.67]} position={[1.33,.825,1.82]} color={light?'#e0dfd7':'#9c9a8b'}/>{[.87,1.32,1.77].map(x=><Block key={x} size={[.012,.49,.015]} position={[x,.5,2.112]} color="#777c74"/>)}
- {/* Bedroom bed, pillow and a small bedside table. */}
- <Block size={[1.18,.27,1.55]} position={[-1.45,.36,-1.14]} color={wood}/><Block size={[1.12,.16,1.46]} position={[-1.45,.56,-1.14]} color={light?'#e1ddd5':'#b1b1a9'}/><Block size={[1.12,.05,1.05]} position={[-1.45,.66,-.9]} color={fabric}/><Block size={[.65,.11,.34]} position={[-1.45,.69,-1.66]} color={light?'#f2efe8':'#d1cbbf'}/><Block size={[1.25,.7,.09]} position={[-1.45,.59,-1.98]} color={wood}/>
- {/* Office chair. */}
- <Block size={[.45,.1,.45]} position={[1.9,.48,-.43]} color={fabric}/><Block size={[.45,.5,.08]} position={[1.9,.75,-.18]} color={fabric}/><Block size={[.035,.32,.035]} position={[1.9,.26,-.43]} color="#707575"/>
- </group>
+/** Simple furniture for each kind of room, placed against the room's back wall. */
+function RoomFurniture({r}:{r:Placed}){
+ const light=useContext(ThemeContext)==='light',fabric=light?'#b0b8b2':'#596561',wood=light?'#a39177':'#776955',pale=light?'#e1ddd5':'#b1b1a9',metal='#707575'
+ const hw=r.w/2,back=-r.d/2,span=Math.min(r.w-.3,1.45)
+ let body
+ switch(r.kind){
+ case 'living':body=<><Block size={[span,.38,.66]} position={[0,.43,back+.5]} color={fabric}/><Block size={[span,.48,.13]} position={[0,.8,back+.24]} color={fabric}/><Block size={[.8,.07,.5]} position={[0,.51,back+1.35]} color={wood}/></>;break
+ case 'kitchen':body=<><Block size={[r.w-.3,.59,.57]} position={[0,.49,back+.4]} color={light?'#d1d4cc':'#657064'}/><Block size={[r.w-.18,.08,.67]} position={[0,.825,back+.4]} color={light?'#e0dfd7':'#9c9a8b'}/></>;break
+ case 'bedroom':body=<><Block size={[1.18,.27,1.55]} position={[0,.36,back+.95]} color={wood}/><Block size={[1.12,.16,1.46]} position={[0,.56,back+.95]} color={pale}/><Block size={[1.12,.05,1.05]} position={[0,.66,back+1.2]} color={fabric}/><Block size={[.65,.11,.34]} position={[0,.69,back+.4]} color={light?'#f2efe8':'#d1cbbf'}/><Block size={[1.25,.7,.09]} position={[0,.59,back+.12]} color={wood}/></>;break
+ case 'office':body=<><Block size={[1.2,.09,.6]} position={[0,.73,back+.45]} color={wood}/>{[-.52,.52].map(x=><Block key={x} size={[.04,.68,.5]} position={[x,.36,back+.45]} color={metal}/>)}<Block size={[.45,.1,.45]} position={[0,.48,back+1.15]} color={fabric}/><Block size={[.45,.5,.08]} position={[0,.75,back+1.4]} color={fabric}/></>;break
+ case 'bathroom':body=<><Block size={[.7,.45,1.3]} position={[-hw+.5,.33,back+.8]} color={pale}/><Block size={[.45,.4,.35]} position={[hw-.4,.3,back+.3]} color={pale}/></>;break
+ case 'store':body=<>{[back+.25,back+.7].map(z=><Block key={z} size={[r.w-.3,1.1,.3]} position={[0,.65,z]} color={wood}/>)}</>;break
+ case 'porch':body=<><Block size={[1,.3,.4]} position={[0,.3,back+.35]} color={wood}/><mesh position={[hw-.35,.35,back+.35]} castShadow><cylinderGeometry args={[.16,.12,.4,16]}/><meshStandardMaterial color={metal}/></mesh></>;break
+ }
+ return <group position={[r.cx,0,r.cz]}>{body}</group>
 }
-function House({roof,heatmap,interactive,onSelect,onRoom,focusRoom,focusDevice}:{roof:boolean;heatmap:boolean;interactive:boolean;onSelect:(id:string)=>void;onRoom:(room:Room)=>void;focusRoom:Room|null;focusDevice:string|null}) {
- const theme=useContext(ThemeContext),light=theme==='light',s=useEnergy(),{devices}=s,flow=getFlow(s)
+type Spot=[number,number,number]
+/** Where each appliance stands: in its room by name, or in the first room when its room is not in the house. */
+function placeDevices(devices:Device[],rooms:Placed[]){
+ const out:Record<string,Spot>={},count:Record<string,number>={},first=rooms[0]
+ for(const d of devices){
+  const r=rooms.find(x=>x.name===d.room)||first,i=(count[r.id]=(count[r.id]??-1)+1)
+  if(d.kind==='kettle'&&r.kind==='kitchen'){out[d.id]=[r.cx+r.w/2-.45,r.y+.86,r.z+.4];continue}
+  const step=Math.min(.75,r.w/3)
+  out[d.id]=[r.cx+((i%3)-1)*step,r.y+.22,r.cz+.35+Math.floor(i/3)%2*.5]
+ }
+ return out
+}
+/** A few steps in the back-left corner show where the stairs come up. */
+function Stairs({x,z,color}:{x:number;z:number;color:string}){
+ return <group>{[0,1,2,3].map(i=><Block key={i} size={[.5,(4-i)*.1,.28]} position={[x+.3,.11+(4-i)*.05,z+.25+i*.28]} color={color}/>)}<Block size={[.05,.5,1.15]} position={[x+.58,.4,z+.65]} color={color}/></group>
+}
+function House({layout,floor,roof,heatmap,interactive,onSelect,onRoom,focusRoom,focusDevice,editRoom,onEditRoom}:{layout:Layout;floor:number;roof:boolean;heatmap:boolean;interactive:boolean;onSelect:(id:string)=>void;onRoom:(room:Room)=>void;focusRoom:Room|null;focusDevice:string|null;editRoom?:string|null;onEditRoom?:(id:string)=>void}) {
+ const theme=useContext(ThemeContext),light=theme==='light',s=useEnergy(),builder=!!onEditRoom,flow=getFlow(s)
+ const allDevices=useMemo(()=>builder?[]:s.devices,[builder,s.devices])
  const data=s.connection==='connected'?s.telemetry:null
- const wall=light?'#d5d5ce':'#686c69',trim=light?'#e3e4df':'#979b97',floor=light?'#b7a793':'#89806f'
- const positions=useMemo(()=>{
-  const result:Record<string,[number,number,number]>={}
-  ROOM_NAMES.forEach(r=>devices.filter(d=>d.room===r).forEach((d,i)=>{const c=centers[r];result[d.id]=placements[d.id]||[c[0]+((i%3)-1)*.75,.22,c[2]+(Math.floor(i/3)%3-1)*.46]}))
-  return result
- },[devices])
+ const wall=light?'#d5d5ce':'#686c69',trim=light?'#e3e4df':'#979b97',floorColor=light?'#b7a793':'#89806f',chosen=light?'#acbaa9':'#728578',solid=light?'#c9cac4':'#5b5f5c'
+ const {placed,depth,rowsOn}=useMemo(()=>pack(layout),[layout])
+ const positions=useMemo(()=>placeDevices(allDevices,placed),[allDevices,placed])
+ const shown=roof?layout.floors:Math.min(Math.max(1,floor),layout.floors)
+ const front=depth/2,back=-depth/2,low=roof?2:.9,top=(layout.floors-1)*FLOOR_H
+ const roomFloor=(name:string)=>(placed.find(r=>r.name===name)||placed[0])?.floor??1
+ const devices=allDevices.filter(d=>roof||roomFloor(d.room)===shown)
+ const focusName=focusRoom||allDevices.find(d=>d.id===focusDevice)?.room
+ const levels=Array.from({length:shown},(_,i)=>i+1)
  return <group>
- <Block size={[6.7,.23,5.1]} position={[0,-.04,0]} color={light?'#a6aaa5':'#494d4b'}/>
- {ROOM_NAMES.map(r=>{const c=centers[r],load=devices.filter(d=>d.room===r&&d.online).reduce((sum,d)=>sum+d.reading,0);return <group key={r}><Block size={[3.04,.055,2.2]} position={[c[0],.11,c[2]]} color={(focusRoom===r||devices.find(d=>d.id===focusDevice)?.room===r)?light?'#acbaa9':'#728578':heatmap?load>700?light?'#beab68':'#a39753':load>100?light?'#a1b2a3':'#6d8777':floor:floor}/>{[0,1,2,3,4,5].map(n=><Block key={n} size={[.007,.003,2.15]} position={[c[0]-1.3+n*.5,.14,c[2]]} color={light?'#9e907d':'#716957'}/>)}{interactive&&!roof&&<Html position={[c[0],.18,c[2]+.83]} center zIndexRange={[8,0]}><button className={`room-label ${focusRoom===r?'active':''}`} onClick={()=>onRoom(r)} aria-label={`Explore ${r}`}>{r}</button></Html>}</group>})}
- {/* An actual architectural cutaway: front and right walls are removed in Inside view. */}
- <Block size={[6.42,2.02,.16]} position={[0,1.16,-2.34]} color={wall}/><Block size={[.16,2.02,4.7]} position={[-3.2,1.16,0]} color={wall}/>
- <Block size={[6.42,roof?2.02:.12,.16]} position={[0,roof?1.16:.21,2.34]} color={wall}/><Block size={[.16,roof?2.02:.12,4.7]} position={[3.2,roof?1.16:.21,0]} color={wall}/>
- <Block size={[.12,roof?2:1.1,4.55]} position={[0,roof?1.16:.73,0]} color={wall}/><Block size={[6.25,roof?2:.8,.12]} position={[0,roof?1.16:.58,0]} color={wall}/>
- <Block size={[6.45,.075,.18]} position={[0,2.22,-2.34]} color={trim}/><Block size={[.18,.075,4.7]} position={[-3.2,2.22,0]} color={trim}/>
- {roof&&<group><Gable z={2.28} color={wall}/><Gable z={-2.42} color={wall}/><Block size={[3.56,.12,5.04]} position={[-1.65,2.71,0]} rotation={[0,0,.32]} color="#3d4244"/><Block size={[3.56,.12,5.04]} position={[1.65,2.71,0]} rotation={[0,0,-.32]} color="#3d4244"/>
- <Block size={[.73,1.67,.04]} position={[-1.96,1.0,2.44]} color="#3b4343"/><Block size={[.043,.17,.04]} position={[-1.7,.94,2.48]} color="#bfc2b8"/>
- {[.6,1.65].map(x=><group key={x}><Block size={[.83,1.02,.035]} position={[x,1.38,2.437]} color="#cfbf8d"/><Block size={[.035,1.1,.045]} position={[x,1.38,2.462]} color="#434b4b"/><Block size={[.9,.035,.045]} position={[x,1.38,2.46]} color="#434b4b"/></group>)}
- </group>}
- <Furniture/>
- <Block size={[.25,.49,.19]} position={[0,.47,2.52]} color={light?'#c1c7c4':'#646d6b'}/>
- {devices.map(d=>{const p=positions[d.id]||[-1.55,.22,1.15] as [number,number,number],active=d.on&&d.online,isSelected=focusDevice===d.id;const wire:[number,number,number][]=[[0,.16,2.54],[0,.16,p[2]],[p[0],.16,p[2]]];return <group key={d.id}>
+ <Block size={[6.7,.23,depth+.4]} position={[0,-.04,0]} color={light?'#a6aaa5':'#494d4b'}/>
+ {levels.map(f=>{const y=(f-1)*FLOOR_H,open=roof||f===shown,rooms=placed.filter(r=>r.floor===f)
+  // A floor below the one being shown is drawn as a solid level, so the shown floor reads clearly.
+  if(!open)return <group key={f}><Block size={[6.42,FLOOR_H-.05,depth+.1]} position={[0,y+FLOOR_H/2+.08,0]} color={solid} edges/></group>
+  return <group key={f} position={[0,y,0]}>
+  {f>1&&<Block size={[6.42,.1,depth+.1]} position={[0,.05,0]} color={light?'#a6aaa5':'#494d4b'}/>}
+  {rooms.map(r=>{const load=devices.filter(d=>d.room===r.name&&d.online).reduce((sum,d)=>sum+d.reading,0),on=builder?editRoom===r.id:focusName===r.name
+   return <group key={r.id}>
+   <group onClick={e=>{if(!builder||roof)return;e.stopPropagation();onEditRoom!(r.id)}}><Block size={[r.w-.16,.055,r.d-.1]} position={[r.cx,.11,r.cz]} color={on?chosen:heatmap?load>700?light?'#beab68':'#a39753':load>100?light?'#a1b2a3':'#6d8777':floorColor:floorColor}/></group>
+   {!roof&&<RoomFurniture r={{...r,y:0}}/>}
+   {r.x+r.w<3.19&&<Block size={[.12,low,r.d-.15]} position={[r.x+r.w,roof?1.16:low/2+.16,r.cz]} color={wall}/>}
+   {(interactive||builder)&&!roof&&<Html position={[r.cx,.18,r.cz+r.d/2-.35]} center zIndexRange={[8,0]}><button className={`room-label ${on?'active':''}`} onClick={()=>builder?onEditRoom!(r.id):onRoom(r.name)} aria-label={builder?`Edit ${r.name}`:`Explore ${r.name}`} aria-pressed={builder?on:undefined}>{r.name}</button></Html>}
+   </group>})}
+  {f>1&&!roof&&<Stairs x={-3.2} z={back} color={trim}/>}
+  {Array.from({length:Math.max(0,rowsOn[f]-1)},(_,i)=><Block key={i} size={[6.25,low,.12]} position={[0,roof?1.16:low/2+.16,back+(i+1)*CELL_D]} color={wall}/>)}
+  {/* An architectural cutaway: the front and right walls are low in the inside view. */}
+  <Block size={[6.42,2.02,.16]} position={[0,1.16,back]} color={wall}/><Block size={[.16,2.02,depth+.1]} position={[-3.2,1.16,0]} color={wall}/>
+  <Block size={[6.42,roof?2.02:.12,.16]} position={[0,roof?1.16:.21,front]} color={wall}/><Block size={[.16,roof?2.02:.12,depth+.1]} position={[3.2,roof?1.16:.21,0]} color={wall}/>
+  <Block size={[6.45,.075,.18]} position={[0,2.22,back]} color={trim}/><Block size={[.18,.075,depth+.1]} position={[-3.2,2.22,0]} color={trim}/>
+  {roof&&<>{f===1&&<><Block size={[.73,1.67,.04]} position={[-1.96,1.0,front+.1]} color="#3b4343"/><Block size={[.043,.17,.04]} position={[-1.7,.94,front+.14]} color="#bfc2b8"/></>}
+   {(f===1?[.6,1.65]:[-1.65,.6,1.65]).map(x=><group key={x}><Block size={[.83,1.02,.035]} position={[x,1.38,front+.097]} color="#cfbf8d"/><Block size={[.035,1.1,.045]} position={[x,1.38,front+.122]} color="#434b4b"/><Block size={[.9,.035,.045]} position={[x,1.38,front+.12]} color="#434b4b"/></group>)}</>}
+  </group>})}
+ {roof&&<group position={[0,top,0]}><Gable z={front-.06} color={wall}/><Gable z={back-.08} color={wall}/><Block size={[3.56,.12,depth+.34]} position={[-1.65,2.71,0]} rotation={[0,0,.32]} color="#3d4244"/><Block size={[3.56,.12,depth+.34]} position={[1.65,2.71,0]} rotation={[0,0,-.32]} color="#3d4244"/></group>}
+ {!builder&&<>
+ <Block size={[.25,.49,.19]} position={[0,.47,front+.18]} color={light?'#c1c7c4':'#646d6b'}/>
+ {devices.map(d=>{const p=positions[d.id],active=d.on&&d.online,isSelected=focusDevice===d.id,y=(placed.find(r=>r.name===d.room)||placed[0]).y+.16
+  // Upper floors are fed by a riser at the front of the house.
+  const wire:Spot[]=y>.2?[[0,.16,front+.2],[0,y,front+.2],[0,y,p[2]],[p[0],y,p[2]]]:[[0,.16,front+.2],[0,.16,p[2]],[p[0],.16,p[2]]]
+  return <group key={d.id}>
  {!roof&&<><Line points={wire} color={!d.online?'#e38c47':active?'#00bd82':'#70746e'} lineWidth={isSelected?1.3:.7} transparent opacity={active?.6:.18}/><FlowDot points={wire} active={active}/></>}
- <group position={p} onClick={e=>{e.stopPropagation();if(interactive&&!roof)onSelect(d.id)}}><Appliance d={d}/>{isSelected&&!roof&&<mesh rotation={[-Math.PI/2,0,0]} position={[0,-p[1]+.15,0]}><ringGeometry args={[.37,.392,48]}/><meshBasicMaterial color="#00ce87" transparent opacity={.7}/></mesh>}</group>
+ <group position={p} onClick={e=>{e.stopPropagation();if(interactive&&!roof)onSelect(d.id)}}><Appliance d={d}/>{isSelected&&!roof&&<mesh rotation={[-Math.PI/2,0,0]} position={[0,y-.01-p[1],0]}><ringGeometry args={[.37,.392,48]}/><meshBasicMaterial color="#00ce87" transparent opacity={.7}/></mesh>}</group>
  {interactive&&!roof&&<Html position={[p[0],p[1]+(d.kind==='fridge'?1.6:d.kind==='lights'?1.35:d.kind==='ac'?1.6:.9),p[2]]} center zIndexRange={[10,0]}><button className={`node-label ${isSelected?'selected':''} ${!d.online?'stale':''}`} onClick={()=>onSelect(d.id)} aria-label={`Select ${d.name}`}><i style={{background:!d.online?'#e38c47':active?'#00ce87':'#7d8583'}}/><span>{d.name}</span><b>{d.online?`${d.reading} ${powerUnit(s.telemetry).short==='VA'?'VA':'watts'}`:'No reading'}</b></button></Html>}
  </group>})}
  {/* Utility connection and standby generator. */}
- <Block size={[.06,2.1,.06]} position={[4.48,1.01,-1.6]} color={light?'#a3aaa7':'#737c77'}/><Block size={[.71,.06,.08]} position={[4.48,2.03,-1.6]} color={light?'#a3aaa7':'#737c77'}/><Block size={[.23,.39,.16]} position={[4.48,1.45,-1.6]} color={light?'#c6ccc7':'#727d76'}/>
- <Block size={[.76,.48,.56]} position={[4.01,.4,1.8]} color={light?'#89968e':'#59685e'}/><Block size={[.55,.27,.022]} position={[4.01,.42,2.097]} color="#272f2d"/>{[-.18,0,.18].map(x=><Block key={x} size={[.015,.22,.025]} position={[4.01+x,.43,2.114]} color="#6d7771"/>)}
+ <Block size={[.06,2.1,.06]} position={[4.48,1.01,back+.7]} color={light?'#a3aaa7':'#737c77'}/><Block size={[.71,.06,.08]} position={[4.48,2.03,back+.7]} color={light?'#a3aaa7':'#737c77'}/><Block size={[.23,.39,.16]} position={[4.48,1.45,back+.7]} color={light?'#c6ccc7':'#727d76'}/>
+ <Block size={[.76,.48,.56]} position={[4.01,.4,front-.5]} color={light?'#89968e':'#59685e'}/><Block size={[.55,.27,.022]} position={[4.01,.42,front-.2]} color="#272f2d"/>
  {interactive&&!focusRoom&&!focusDevice&&<>
- {data?.sources.generator!=null&&data.sources.generator>0&&<Html position={[4.1,.95,2.35]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.generator}}/><b>{Math.round(flow.generator).toLocaleString()} W</b><span>Generator</span></div></Html>}
- <Html position={[4.45,.12,-1.7]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.grid}}/><b>{data?.sources.grid!=null?`${Math.round(data.sources.grid).toLocaleString()} W`:data?.demand_w!=null&&data.demand_scope==='whole_home'?`${Math.round(data.demand_w).toLocaleString()} ${powerUnit(data).short}`:'Unknown'}</b><span>{data?.sources.grid!=null?'Grid meter':'Mains clamp'}</span></div></Html>
+ {data?.sources.generator!=null&&data.sources.generator>0&&<Html position={[4.1,.95,front+.05]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.generator}}/><b>{Math.round(flow.generator).toLocaleString()} W</b><span>Generator</span></div></Html>}
+ <Html position={[4.45,.12,back+.6]} center zIndexRange={[9,0]}><div className="source-callout"><i style={{background:SOURCE_COLORS.grid}}/><b>{data?.sources.grid!=null?`${Math.round(data.sources.grid).toLocaleString()} W`:data?.demand_w!=null&&data.demand_scope==='whole_home'?`${Math.round(data.demand_w).toLocaleString()} ${powerUnit(data).short}`:'Unknown'}</b><span>{data?.sources.grid!=null?'Grid meter':'Whole house'}</span></div></Html>
+ </>}
  </>}
  </group>
 }
-function FocusCamera({room,deviceId,roof,interactive,rotation,resetKey}:{room:Room|null;deviceId:string|null;roof:boolean;interactive:boolean;rotation:boolean;resetKey:number}) {
+function FocusCamera({layout,floor,room,deviceId,roof,interactive,rotation,resetKey,zoom=1}:{layout:Layout;floor:number;room:Room|null;deviceId:string|null;roof:boolean;interactive:boolean;rotation:boolean;resetKey:number;zoom?:number}) {
  const controls=useRef<OrbitControlsImpl>(null),moving=useRef(false),goal=useRef(new THREE.Vector3()),target=useRef(new THREE.Vector3()),{camera,size}=useThree()
  const devices=useEnergy(s=>s.devices)
+ const {placed,depth}=useMemo(()=>pack(layout),[layout])
  useEffect(()=>{
-  const device=devices.find(d=>d.id===deviceId),r=device?.room||room
-  const center=r&&!roof?centers[r]:[0,.5,0]
-  target.current.set(center[0],r&&!roof?.55:.5,center[2])
-  const offset=new THREE.Vector3(...(r&&!roof?[5,5.3,7.1]:[8,6.9,10.6]) as [number,number,number])
-  offset.multiplyScalar(Math.max(1,1.55/(size.width/size.height)))
+  // The canvas can measure 0 x 0 for a moment when it first opens; 0/0 would make the camera NaN for good.
+  if(!size.width||!size.height)return
+  const device=devices.find(d=>d.id===deviceId),name=device?.room||room
+  const r=name&&!roof?placed.find(x=>x.name===name)||placed[0]:null
+  const levelY=roof?layout.floors*FLOOR_H/2:(Math.min(floor,layout.floors)-1)*FLOOR_H
+  target.current.set(r?r.cx:0,r?r.y+.55:levelY+.5,r?r.cz:0)
+  const offset=new THREE.Vector3(...(r?[5,5.3,7.1]:[8,6.9,10.6]) as Spot)
+  offset.multiplyScalar(Math.max(1,1.55/(size.width/size.height))*(r?1:Math.max(1,depth/4.6))*zoom)
   goal.current.copy(target.current).add(offset)
   moving.current=true
- },[room,deviceId,roof,camera,size.width,size.height,resetKey])
+ },[room,deviceId,roof,floor,camera,size.width,size.height,resetKey,placed,depth,zoom,layout.floors])
  useFrame((_,dt)=>{
   if(!moving.current||!controls.current)return
   const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const blend=reduced?1:1-Math.exp(-10*dt)
+  // A camera that ever became NaN jumps straight to its goal instead of blending from nowhere.
+  const broken=![camera.position.x,camera.position.y,camera.position.z,controls.current.target.x].every(Number.isFinite)
+  const blend=reduced||broken?1:1-Math.exp(-10*dt)
   camera.position.lerp(goal.current,blend);controls.current.target.lerp(target.current,blend);controls.current.update()
   if(camera.position.distanceTo(goal.current)<.015){moving.current=false}
  })
- return <OrbitControls ref={controls} enabled={interactive} makeDefault target={[0,.5,0]} minDistance={7} maxDistance={23} maxPolarAngle={Math.PI*.47} enablePan={false} onStart={()=>{moving.current=false}} autoRotate={rotation&&interactive&&!room&&!deviceId} autoRotateSpeed={.45}/>
+ return <OrbitControls ref={controls} enabled={interactive} makeDefault target={[0,.5,0]} minDistance={zoom<1?6:7} maxDistance={28} maxPolarAngle={Math.PI*.47} enablePan={false} onStart={()=>{moving.current=false}} autoRotate={rotation&&interactive&&!room&&!deviceId} autoRotateSpeed={.45}/>
 }
-export default function HouseScene({roof,heatmap,rotation,viewKey,interactive=true,onSelect,onRoom,focusRoom,focusDevice,theme}:{roof:boolean;heatmap:boolean;rotation:boolean;viewKey:number;interactive?:boolean;onSelect:(id:string)=>void;onRoom:(room:Room)=>void;focusRoom:Room|null;focusDevice:string|null;theme:Theme}) {
+/** The 3D house. It is drawn from the saved home layout, or from `layout` while the home is being built.
+ * `floor` is the floor shown in the inside view; the outside view shows every floor.
+ * With onEditRoom set it is the builder: rooms are tapped to edit them, and appliances are hidden. */
+export default function HouseScene({layout,floor=1,roof,heatmap,rotation,viewKey,interactive=true,onSelect,onRoom,focusRoom,focusDevice,theme,editRoom,onEditRoom}:{layout?:Layout;floor?:number;roof:boolean;heatmap:boolean;rotation:boolean;viewKey:number;interactive?:boolean;onSelect:(id:string)=>void;onRoom:(room:Room)=>void;focusRoom:Room|null;focusDevice:string|null;theme:Theme;editRoom?:string|null;onEditRoom?:(id:string)=>void}) {
+ const saved=useHome(s=>s.layout),home=layout||saved
  const light=theme==='light',background=light?'#f5f5f3':'#161718'
- return <ThemeContext.Provider value={theme}><Canvas shadows camera={{position:[8,7.4,10.6],fov:39}} dpr={[1,1.7]} gl={{antialias:true}}><color attach="background" args={[background]}/><fog attach="fog" args={[background,22,50]}/><ambientLight intensity={light?1.3:1.05}/><directionalLight castShadow position={[3,8,5]} intensity={light?2.5:2.1} color="#fff2de" shadow-mapSize={[1024,1024]} shadow-camera-left={-8} shadow-camera-right={8} shadow-camera-top={8} shadow-camera-bottom={-8} shadow-bias={-.001}/><directionalLight position={[-5,4,-4]} intensity={light?.8:.7} color="#d5e6ea"/><House roof={roof} heatmap={heatmap} interactive={interactive} onSelect={onSelect} onRoom={onRoom} focusRoom={focusRoom} focusDevice={focusDevice}/><ContactShadows position={[0,-.18,0]} opacity={light?.32:.6} scale={19} blur={2.2} far={4.5} resolution={256} color={light?'#7c817d':'#080b09'}/><FocusCamera resetKey={viewKey} room={focusRoom} deviceId={focusDevice} roof={roof} interactive={interactive} rotation={rotation}/></Canvas></ThemeContext.Provider>
+ return <ThemeContext.Provider value={theme}><Canvas shadows camera={{position:[8,7.4,10.6],fov:39}} dpr={[1,1.7]} gl={{antialias:true}}><color attach="background" args={[background]}/><fog attach="fog" args={[background,26,60]}/><ambientLight intensity={light?1.3:1.05}/><directionalLight castShadow position={[3,10,5]} intensity={light?2.5:2.1} color="#fff2de" shadow-mapSize={[1024,1024]} shadow-camera-left={-9} shadow-camera-right={9} shadow-camera-top={9} shadow-camera-bottom={-9} shadow-bias={-.001}/><directionalLight position={[-5,4,-4]} intensity={light?.8:.7} color="#d5e6ea"/><House layout={home} floor={floor} roof={roof} heatmap={heatmap} interactive={interactive} onSelect={onSelect} onRoom={onRoom} focusRoom={focusRoom} focusDevice={focusDevice} editRoom={editRoom} onEditRoom={onEditRoom}/><ContactShadows position={[0,-.18,0]} opacity={light?.32:.6} scale={21} blur={2.2} far={4.5} resolution={256} color={light?'#7c817d':'#080b09'}/><FocusCamera layout={home} floor={floor} resetKey={viewKey} room={focusRoom} deviceId={focusDevice} roof={roof} interactive={interactive||!!onEditRoom} rotation={rotation} zoom={onEditRoom?.62:1}/></Canvas></ThemeContext.Provider>
 }

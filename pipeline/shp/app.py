@@ -259,7 +259,7 @@ def main(argv=None):
     sub.choices["teach"].add_argument("--setting")
     sub.choices["teach"].add_argument("--kind", default="generic", help="how the app draws it, e.g. fridge, lights, ac")
     sub.choices["teach"].add_argument("--room", default="Living room",
-                                      help="Living room, Kitchen, Bedroom or Office")
+                                      help="the room name, as you named it when you built your home in the app")
     sub.add_parser("connect", help="register the gateway, mains and taught devices with the app backend")
     sub.choices["run"].add_argument("--slm", nargs="?", const="http://localhost:8000",
                                     help="LM Studio server running lfm3-1.7b (default http://localhost:8000)")

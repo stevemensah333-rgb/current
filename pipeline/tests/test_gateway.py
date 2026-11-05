@@ -214,9 +214,11 @@ def test_connect_refuses_id_collisions(monkeypatch, tmp_path, library):
         connect("http://x", "owner", tmp_path / "k.key", clash)
 
 
-def test_teach_room_must_be_an_app_room():
-    with pytest.raises(ValueError, match="room must be one of"):
-        TeachSession("kettle", S, room="Garage")
+def test_teach_room_is_any_name_the_user_built():
+    assert TeachSession("kettle", S, room="  Bedroom 2 ").room == "Bedroom 2"
+    for bad in ("", "   ", "x" * 17):
+        with pytest.raises(ValueError, match="1 to 16 characters"):
+            TeachSession("kettle", S, room=bad)
 
 
 def test_faults_survive_a_restart(tmp_path):

@@ -64,3 +64,46 @@
 .home-story{width:auto}
 .float-card .home-guidance{max-width:none}
 .health-note{margin:0 0 4px}
+
+/* Details: a button on the canvas, and tabs inside the card */
+.canvas-details{position:fixed;left:24px;top:180px;z-index:35;pointer-events:auto;
+ background:color-mix(in srgb,var(--surface) 60%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.card-tabs{display:flex;gap:4px;padding:4px;border-radius:12px;background:color-mix(in srgb,var(--surface-raised) 60%,transparent);margin:2px 0 14px}
+.card-tabs button{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 6px;border-radius:9px;font-size:13px;color:var(--text-secondary);background:none;border:0;cursor:pointer;position:relative}
+.card-tabs button.active{background:var(--surface);color:var(--text)}
+.card-tabs .tab-count{font-style:normal;font-size:11px;min-width:18px;padding:1px 5px;border-radius:999px;background:#e35d47;color:#fff}
+.card-panel{display:grid;gap:12px}
+.room-list{display:grid;gap:8px}.room-list button{display:flex;justify-content:space-between;align-items:center}
+@media(max-width:520px){.card-tabs button span{display:none}}
+
+/* Critique fixes */
+.eyebrow,.biggest-user .eyebrow,.float-card .eyebrow{font-size:11.5px!important}
+.idle-dot{background:var(--text-secondary)!important}
+.theme-toggle{width:38px;height:38px;padding:0;justify-content:center}
+.canvas-details .tab-count,.card-tabs .tab-count{font-style:normal;font-size:11px;min-width:18px;padding:1px 5px;border-radius:999px;background:#e35d47;color:#fff;margin-left:6px}
+.drag-grip{background:none;border:0;color:var(--text-secondary);cursor:grab;padding:4px 8px;font-size:16px;line-height:1;border-radius:6px}
+.info-tip{display:inline-flex;margin-left:6px;color:var(--text-secondary);cursor:help;vertical-align:middle}
+.segmented{display:flex;gap:2px;padding:3px;border-radius:10px;background:color-mix(in srgb,var(--surface-raised) 70%,transparent);width:fit-content}
+.segmented button{padding:6px 12px;font-size:13px;border:0;background:none;border-radius:8px;color:var(--text-secondary);cursor:pointer}
+.segmented button.active{background:var(--surface);color:var(--text)}
+.example-questions{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.example-questions button{font-size:13px;padding:6px 10px}
+.other-card{cursor:default;opacity:.85}
+.view-controls button small{display:none}
+.stage-float button[hidden]{display:none}
+@media(hover:none){.view-controls button{flex-direction:column;gap:2px;min-width:48px;min-height:48px}.view-controls button small{display:block;font-size:10px}}
+[data-theme="light"]{--text-tertiary:#5f6868}
+@media(max-width:760px){
+ .demo-label,.setup-button span{display:none}
+ .view-controls button{min-width:44px;min-height:44px}
+ .float-card{left:0!important;right:0;top:auto!important;bottom:0;width:100%;max-height:48vh;border-radius:16px 16px 0 0}
+ .canvas-details{top:auto;bottom:16px;left:16px}
+ .health-table thead{display:none}
+ .health-table,.health-table tbody,.health-table tr,.health-table th,.health-table td{display:block;width:100%}
+ .health-table tr{border:1px solid var(--border);border-radius:12px;margin-bottom:10px;padding:4px 0}
+ .health-table th,.health-table td{border-bottom:0;padding:8px 14px}
+ .health-table td[data-label]::before{content:attr(data-label);display:block;font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+}
+/* The house sits in the middle of the canvas; cards float over it. */
+@media(min-width:761px){.model-backdrop.foreground{width:100%!important}.house-hint{left:0!important;right:0!important}}
+.floor-switch b{font-size:13px;font-weight:600;min-width:17px;text-align:center}

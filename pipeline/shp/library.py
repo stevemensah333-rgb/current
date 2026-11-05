@@ -62,14 +62,14 @@ class DeviceEntry:
     baseline: Baseline
     live_examples: list[Signature] = field(default_factory=list)
     kind: str = "generic"         # how the app's house draws it, e.g. "fridge", "lights", "ac"
-    room: str = "Living room"     # one of ROOMS
+    room: str = "Living room"     # a room name from the home the user built in the app
 
     @property
     def label(self) -> str:
         return f"{self.name}|{self.setting}" if self.setting else self.name
 
 
-ROOMS = ("Living room", "Kitchen", "Bedroom", "Office")   # the rooms the app's house has
+ROOM_MAX = 16   # the app limits room names to 16 characters
 
 
 def base_name(label: str) -> str:
@@ -82,8 +82,9 @@ class TeachSession:
 
     def __init__(self, name: str, settings: Settings, setting: str | None = None,
                  kind: str = "generic", room: str = "Living room"):
-        if room not in ROOMS:
-            raise ValueError(f"room must be one of: {', '.join(ROOMS)}")
+        room = room.strip()
+        if not room or len(room) > ROOM_MAX:
+            raise ValueError(f"room must be 1 to {ROOM_MAX} characters, as named in the app")
         self.name, self.setting, self.settings = name, setting, settings
         self.kind, self.room = kind, room
         self.on: list[Signature] = []
