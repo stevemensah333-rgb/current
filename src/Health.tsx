@@ -34,7 +34,7 @@ export function DeviceHealth(){
  return <div className="screen-content health-screen">
   <div className="health-intro"><Icon name="pulse" size={26}/><div>
    <p className="muted">Every time a device switches on, we compare it with how it behaved when you taught it. A slow change can warn of a fault before the device fails.</p></div></div>
-  {!devices.length?<p className="empty">No appliances named yet. Name one in teach mode: switch it on and off a few times while the app listens. It then appears here.</p>:
+  {!devices.length?<p className="empty">No appliances named yet. Register one under Appliances → Register device: switch it on and off five times while the app listens. It then appears here.</p>:
   <div className="panel health-table-wrap"><table className="health-table">
    <thead><tr><th>Device</th><th>Status</th><th>What we noticed</th><th>Last check</th></tr></thead>
    <tbody>{devices.map(d=>{const h=health.get(d.id) as Health|undefined

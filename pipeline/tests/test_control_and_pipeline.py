@@ -73,9 +73,9 @@ FRIDGE = wave(1.0, phase_deg=40, third=0.05)
 
 def teach(name, fn, s):
     session = TeachSession(name, s)
-    stream = cycles_from([(30, lambda t: 0 * t), (120, fn), (60, lambda t: 0 * t)] * 3, seed=1)
+    stream = cycles_from([(30, lambda t: 0 * t), (120, fn), (60, lambda t: 0 * t)] * 5, seed=1)
     for e in detect(stream, s.threshold_a):
-        session.add(extract(e, s))
+        session.add(extract(e, s), e)
     return session.finish()
 
 

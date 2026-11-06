@@ -64,6 +64,10 @@ class Pipeline:
         self.events: list[tuple] = []   # (direction, signature, prediction) since the caller last cleared it
         self.flags: list[dict] = []     # structured alerts since the caller last cleared it
         self.health: list[dict] = []    # device health summaries since the caller last cleared it
+        # Registration: while a TeachSession is set, every switch goes to it instead of the classifier,
+        # so the device being registered is never named, logged or alerted on. Mains keeps measuring.
+        self.teach: TeachSession | None = None
+        self.teach_turns: list = []     # Turn results since the caller last cleared it
 
     @property
     def capturing(self) -> bool:
@@ -92,6 +96,12 @@ class Pipeline:
         if event is None:
             return out
         sig = extract(event, self.s)
+        if self.teach is not None:
+            turn = self.teach.add(sig, event)
+            self.teach_turns.append(turn)
+            out.append(f"REGISTER {self.teach.name}: {turn.message}")
+            self.power.reanchor(MAINS_V * statistics.fmean(x.current_a for x in event.after[-STEADY_CYCLES:]))
+            return out
         if sig.direction > 0:
             pred = classify(sig, on_candidates(self.library, self.s), self.model)
             self.house.switched_on(sig, pred)
@@ -157,25 +167,23 @@ def cmd_teach(args):
     lib = Library.load(LIBRARY)
     session = TeachSession(args.name, s, args.setting, kind=args.kind, room=args.room)
     det = Detector(s.threshold_a)
-    print(f"Teaching '{args.name}'. Switch it on and off; nothing else should change. Ctrl+C to finish.")
+    print(f"Registering '{args.name}': {session.target} turns. Each turn: switch it on, wait until it settles, "
+          "switch it off. Nothing else should change. Ctrl+C to stop.")
     try:
         for c in transform(_lines(args)):
             event = det.feed(c)
             if event:
-                sig = extract(event, s)
-                word = "on " if sig.direction > 0 else "off"
-                number = session.rounds + 1 if sig.direction > 0 else max(1, session.rounds)   # a round is one on + off
-                print(f"round {number}: {word} {sig.step_va:+.0f} VA -> {session.add(sig)}")
-                if session.varies:
+                print(session.add(extract(event, s), event).message)
+                if session.ready or session.varies:
                     break
     except KeyboardInterrupt:
         pass
     if session.ready:
         lib.add_device(session.finish())
         lib.save(LIBRARY)
-        print(f"saved '{args.name}' with {len(session.on)} on- and {len(session.off)} off-rounds")
+        print(f"saved '{args.name}' with {len(session.turns)} turns")
     else:
-        print("not saved: not enough good rounds")
+        print(f"not saved: {len(session.turns)} of {session.target} turns kept")
 
 
 def cmd_run(args):

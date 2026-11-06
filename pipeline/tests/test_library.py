@@ -9,7 +9,7 @@ S = Settings(threshold_a=0.05)
 KETTLE = shape(wave(8.7, third=0.1))
 
 
-def taught(name="kettle", step=2000, steady=KETTLE, rounds=3, setting=None):
+def taught(name="kettle", step=2000, steady=KETTLE, rounds=5, setting=None):
     t = TeachSession(name, S, setting)
     for i in range(rounds):
         t.add(sig(step + 5 * i, steady))
@@ -17,46 +17,96 @@ def taught(name="kettle", step=2000, steady=KETTLE, rounds=3, setting=None):
     return t
 
 
+def turn(t, step, steady=KETTLE, off_step=None, off_steady=None):
+    """One turn: a switch-on, then a switch-off. Returns the switch-off's Turn."""
+    t.add(sig(step, steady))
+    return t.add(sig(step if off_step is None else off_step, steady if off_steady is None else off_steady,
+                     direction=-1))
+
+
 def test_mad_example_from_the_design():
     assert mad([2000, 2010, 2500]) == 10
 
 
-def test_odd_round_is_dropped():
+def test_a_turn_is_a_switch_on_then_its_switch_off():
     t = TeachSession("kettle", S)
-    for step in (2000, 2010):
-        t.add(sig(step, KETTLE))
-    msg = t.add(sig(2500, KETTLE))
-    assert "odd round dropped" in msg
-    assert [round(abs(s.step_va)) for s in t.on] == [2000, 2010]
+    first = t.add(sig(2000, KETTLE))
+    assert first.status == "waiting" and "Now switch it off" in first.message and t.turns == []
+    kept = t.add(sig(2000, KETTLE, direction=-1))
+    assert kept.status == "kept" and kept.number == 1 and "turn 1 of 5 kept" in kept.message
+    assert len(t.turns) == 1 and t.on[0].direction == 1 and t.off[0].direction == -1
 
 
-def test_odd_shape_is_dropped():
-    t = TeachSession("kettle", S)
-    t.add(sig(2000, KETTLE))
-    t.add(sig(2000, KETTLE))
-    assert "odd round dropped" in t.add(sig(2000, shape(np.cos)))
-
-
-def test_untrusted_rounds_are_refused():
-    t = TeachSession("kettle", S)
-    assert t.add(sig(2000, low_trust=True)).startswith("refused: other big loads")
-    assert t.add(sig(2000, clean=False)).startswith("refused: readings were lost")
-    assert t.add(sig(2000, settled=False)).startswith("refused: the device never settled")
-    assert t.on == []
-
-
-def test_finish_needs_three_on_and_off_rounds():
-    t = taught(rounds=2)
+def test_exactly_five_turns_then_finished():
+    t = taught(rounds=4)
+    assert not t.ready
     with pytest.raises(ValueError):
         t.finish()
-    assert taught(rounds=3).ready
+    last = turn(t, 2020)
+    assert t.ready and "all 5 turns done" in last.message
+    assert t.add(sig(2000, KETTLE)).status == "ignored"      # a sixth switch is not used
+    entry = t.finish()
+    assert len(entry.on_examples) == 5 and len(entry.off_examples) == 5   # kept separately, not averaged
 
 
-def test_device_that_varies_stops_after_max_rounds():
+def test_odd_power_is_a_redo_and_kept_turns_stay():
+    t = TeachSession("kettle", S)
+    turn(t, 2000)
+    turn(t, 2010)
+    odd = turn(t, 2500)
+    assert odd.status == "redo" and "far from the other turns" in odd.message and "Do turn 3 again" in odd.message
+    assert [round(abs(s.step_va)) for s in t.on] == [2000, 2010]
+    assert turn(t, 2005).number == 3
+
+
+def test_odd_shape_is_a_redo():
+    t = TeachSession("kettle", S)
+    turn(t, 2000)
+    turn(t, 2000)
+    odd = turn(t, 2000, steady=shape(np.cos))
+    assert odd.status == "redo" and "shape is different" in odd.message and len(t.turns) == 2
+
+
+def test_switch_off_must_match_its_switch_on():
+    t = TeachSession("kettle", S)
+    r = turn(t, 2000, off_step=1500)
+    assert r.status == "redo" and "did not match" in r.message and t.turns == []
+
+
+def test_untrusted_switches_are_refused_and_do_not_count():
+    t = TeachSession("kettle", S)
+    assert "other big loads" in t.add(sig(2000, low_trust=True)).message
+    assert "readings were lost" in t.add(sig(2000, clean=False)).message
+    assert "never settled" in t.add(sig(2000, settled=False)).message
+    assert t.turns == [] and t.redos == 0
+    assert t.add(sig(2000, KETTLE, direction=-1)).status == "ignored"   # an off with no on before it
+    assert turn(t, 2000).number == 1
+
+
+def test_device_that_varies_stops_after_max_redos():
     t = TeachSession("lamp", S)
-    for _ in range(S.max_rounds):
-        msg = t.add(sig(100, low_trust=True))
-    assert t.varies and "varies a lot" in msg
+    for _ in range(S.max_redos):
+        r = turn(t, 100, off_step=300)
+    assert t.varies and "varies a lot" in r.message
+
+
+def test_each_turn_keeps_its_raw_waveform():
+    from helpers import cycles_from, wave as w
+    from shp.detector import detect
+    from shp.extractor import extract
+    s = Settings(threshold_a=0.05)
+    t = TeachSession("heater", s)
+    stream = cycles_from([(30, lambda x: 0 * x), (120, w(4.0)), (60, lambda x: 0 * x)], seed=3)
+    turns = [t.add(extract(e, s), e) for e in detect(stream, s.threshold_a)]
+    kept = turns[-1]
+    assert kept.status == "kept"
+    wf = kept.waveform
+    assert wf["readings_per_cycle"] == 17
+    assert len(wf["on"]["before"]) == 10 and len(wf["on"]["after"]) >= 50
+    assert len(wf["off"]["before"]) == 10 and all(len(c) == 17 for c in wf["off"]["after"])
+    # the raw readings themselves: about 4 A RMS after the switch-on
+    after = np.array(wf["on"]["after"][-10:])
+    assert abs(np.sqrt(np.mean(after ** 2)) - 4.0) < 0.1
 
 
 def test_baseline_ranges_have_floors():

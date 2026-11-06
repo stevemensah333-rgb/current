@@ -22,8 +22,8 @@ class Settings:
     max_carry_cycles: int = 25          # clock carried from before over > 25 cycles -> low trust
 
     # 4 Library
-    max_rounds: int = 8
-    min_rounds: int = 3
+    teach_turns: int = 5    # registration: kept turns (one switch-on + its switch-off each)
+    max_redos: int = 5      # odd turns allowed before "this device varies a lot"
     shape_floor: float = 0.1
     working_min_p: float = 0.9
     working_per_device: int = 20

@@ -90,7 +90,7 @@ def test_energy_follows_board_time():
 
 def lamp_library():
     t = TeachSession("lamp", S)
-    for i in range(3):
+    for i in range(5):
         t.add(sig(60 + i, LAMP, settle_ms=40))
         t.add(sig(60 + i, LAMP, direction=-1))
     return Library([t.finish()])

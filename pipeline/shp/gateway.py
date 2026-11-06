@@ -130,10 +130,42 @@ class Clock:
 
 # --- the gateway --------------------------------------------------------------------------------------------
 
+class RegistrationWatch:
+    """Asks the backend every 2 s, on its own thread, which registration the app wants running.
+    The gateway only reads .wanted, so a slow or stopped backend never holds up the readings.
+    While the backend cannot be reached the last answer is kept, so a short outage does not cancel a registration."""
+
+    def __init__(self, fetch: Callable[[], tuple[int, object]], every_s: float = 2.0):
+        self.fetch, self.every_s = fetch, every_s
+        self.wanted: dict | None = None
+
+    def check(self) -> None:
+        try:
+            status, body = self.fetch()
+        except Exception:   # backend down or an odd answer: keep the last one; the thread must never die
+            return
+        if status == 200 and isinstance(body, dict):
+            self.wanted = body.get("registration")
+
+    def start(self) -> "RegistrationWatch":
+        import threading
+
+        def loop():
+            while True:
+                self.check()
+                time.sleep(self.every_s)
+        threading.Thread(target=loop, daemon=True, name="registration-watch").start()
+        return self
+
+
 class Gateway:
     def __init__(self, pipeline, outbox: Outbox, clock: Clock, replay: bool = False,
-                 save: Callable[[], None] = lambda: None):
+                 save: Callable[[], None] = lambda: None, wanted: Callable[[], dict | None] = lambda: None):
         self.pipe, self.outbox, self.clock, self.save = pipeline, outbox, clock, save
+        self.wanted = wanted
+        self.registration: str | None = None   # id of the registration running now
+        self.reg_ended: set[str] = set()      # finished here; the app's answer can lag by one poll
+        self.reg_messages = 0
         self.boot = ("replay-" if replay else "") + uuid.uuid4().hex[:12]
         self.channels = sorted({channel_id(d.label) for d in pipeline.library.devices})
         self.seq: dict[str, int] = {}
@@ -196,6 +228,65 @@ class Gateway:
             **{k: r(h[k]) for k in ("shape_diff", "shape_limit", "surge_peak", "surge_low", "surge_high",
                                   "settle_ms", "settle_low", "settle_high", "p")}})
 
+    # --- registration -------------------------------------------------------------------------------------
+
+    def _reg_post(self, kind: str, payload: dict) -> None:
+        self.reg_messages += 1
+        self.outbox.put(f"/api/v1/gateway/registrations/{self.registration}/{kind}",
+                        {"schema_version": 1, "message_id": f"{self.boot}-reg-{self.reg_messages}", **payload})
+
+    def _reg_stop(self, status: str, message: str, **extra) -> None:
+        self._reg_post("status", {"status": status, "message": message, **extra})
+        log(f"registration {status}: {message}")
+        self.reg_ended.add(self.registration)
+        self.pipe.teach, self.registration = None, None
+
+    def _follow_registration(self) -> None:
+        """Start, cancel or finish a registration as the app asks, and send every turn back."""
+        from shp.library import TeachSession
+        wanted = self.wanted()
+        if self.registration and (not wanted or wanted.get("id") != self.registration):
+            log("registration cancelled in the app")
+            self.reg_ended.add(self.registration)
+            self.pipe.teach, self.registration = None, None
+            self.pipe.teach_turns = []
+        if (wanted and self.registration is None and wanted.get("status") in ("waiting", "running")
+                and wanted.get("id") not in self.reg_ended):
+            self.registration = wanted["id"]
+            try:
+                self.pipe.teach = TeachSession(wanted["name"], self.pipe.s, wanted.get("setting"),
+                                               kind=wanted.get("kind") or "generic", room=wanted.get("room") or "Living room")
+            except ValueError as e:
+                self._reg_stop("failed", str(e))
+                return
+            self.pipe.teach_turns = []
+            self._reg_post("status", {"status": "running", "message": f"listening for {self.pipe.teach.target} turns"})
+            log(f"registering '{wanted['name']}'")
+
+        turns, self.pipe.teach_turns = getattr(self.pipe, "teach_turns", []), []
+        session = getattr(self.pipe, "teach", None)
+        if session is None or self.registration is None:
+            return
+        for t in turns:
+            self._reg_post("turns", {
+                "status": t.status, "number": t.number, "message": t.message,
+                "on_step_va": None if t.on is None else round(t.on.step_va, 1),
+                "off_step_va": None if t.off is None else round(t.off.step_va, 1),
+                "shape": None if t.on is None or not t.on.steady else [round(v, 4) for v in t.on.steady],
+                "waveform": t.waveform})
+        if session.ready:
+            entry = session.finish()
+            self.pipe.library.add_device(entry)
+            self.save()
+            ch = channel_id(entry.label)
+            if ch not in self.channels:
+                self.channels = sorted(self.channels + [ch])
+                self.last_va.setdefault(ch, None)
+                self.last_p.setdefault(ch, None)
+            self._reg_stop("done", f"saved with {len(session.turns)} turns", device_id=ch)
+        elif session.varies:
+            self._reg_stop("failed", "this device varied a lot between turns; nothing was saved")
+
     def _heartbeat(self, wall_ms: int) -> None:
         for ch, (va, p) in self.channel_state().items():
             self._post_device(ch, va, p, wall_ms)
@@ -229,6 +320,7 @@ class Gateway:
             self._post_health(h)
         if events or flags or health:
             self.save()
+        self._follow_registration()
 
         if self.pipe.capturing:
             self.pause_since = self.pause_since if self.pause_since is not None else wall
@@ -303,7 +395,8 @@ def run(lines, pipeline, api: str, gateway_token: str, replay: bool, save: Calla
     """Feeds every cycle through the gateway. A replay is paced at real time, so its readings land 'now'."""
     from shp.transform import transform
     outbox = Outbox(lambda path, body: request(api, "POST", path, gateway_token, body)[0], now_ms)
-    gw = Gateway(pipeline, outbox, Clock(now_ms), replay=replay, save=save)
+    watch = RegistrationWatch(lambda: request(api, "GET", "/api/v1/gateway/registration", gateway_token, timeout=2)).start()
+    gw = Gateway(pipeline, outbox, Clock(now_ms), replay=replay, save=save, wanted=lambda: watch.wanted)
     for c in transform(lines):
         if replay:
             while now_ms() < pipeline.house.to_wall(c.t_ms):

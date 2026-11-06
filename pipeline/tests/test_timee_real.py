@@ -40,7 +40,7 @@ def library():
     lib = Library()
     for i, (name, fn) in enumerate(DEVICES.items()):
         session = TeachSession(name, S)
-        for sig in signatures(fn, 4, seed=10 + i):
+        for sig in signatures(fn, 5, seed=10 + i):
             session.add(sig)
         lib.add_device(session.finish())
     return lib

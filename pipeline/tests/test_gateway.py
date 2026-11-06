@@ -81,8 +81,8 @@ def test_clock_never_goes_back_never_ahead_and_corrects_slowly():
 
 def teach(name, fn):
     session = TeachSession(name, S, kind=name, room="Kitchen")
-    for e in detect(cycles_from([(30, OFF), (120, fn), (60, OFF)] * 3, seed=1), S.threshold_a):
-        session.add(extract(e, S))
+    for e in detect(cycles_from([(30, OFF), (120, fn), (60, OFF)] * 5, seed=1), S.threshold_a):
+        session.add(extract(e, S), e)
     return session.finish()
 
 
@@ -282,3 +282,57 @@ def test_health_summaries_are_posted(library):
         g.feed(c)
     [h] = [b for p, b in posted if p == "/api/v1/health"]
     assert h["device_id"] == "fridge" and h["status"] == "watch" and h["settle_ms"] == 400.0 and "label" not in h
+
+
+# registration from the app: 5 turns, each sent back with its raw waveform
+
+def register(library, segments, wanted):
+    posted, now = [], {"t": 0}
+    pipe = Pipeline(S, library, NearestModel(), now_ms=lambda: 0)
+    box = Outbox(lambda path, body: posted.append((path, json.loads(body))) or 200, lambda: now["t"])
+    saved = []
+    g = Gateway(pipe, box, Clock(lambda: now["t"]), save=lambda: saved.append(1), wanted=lambda: wanted["now"])
+    for c in cycles_from(segments, seed=4):
+        now["t"] = c.t_ms + 5
+        g.feed(c)
+    return g, pipe, posted, saved
+
+
+HEATER = wave(4.0)
+REG = {"id": "ab12", "status": "waiting", "name": "Heater", "setting": None, "kind": "heater", "room": "Bedroom"}
+
+
+def test_gateway_runs_a_registration_and_adds_the_device(library):
+    lib = Library(list(library.devices))
+    g, pipe, posted, saved = register(lib, [(30, OFF)] + [(120, HEATER), (60, OFF)] * 5 + [(300, OFF)], {"now": REG})
+    turns = [p for path, p in posted if path == "/api/v1/gateway/registrations/ab12/turns"]
+    status = [p for path, p in posted if path == "/api/v1/gateway/registrations/ab12/status"]
+    assert [p["status"] for p in status] == ["running", "done"] and status[-1]["device_id"] == "heater"
+    assert [t["status"] for t in turns] == ["waiting", "kept"] * 5
+    kept = [t for t in turns if t["status"] == "kept"]
+    assert [t["number"] for t in kept] == [1, 2, 3, 4, 5]
+    assert all(len(t["waveform"]["on"]["before"]) == 10 and t["waveform"]["readings_per_cycle"] == 17 for t in kept)
+    assert all(t["on_step_va"] > 900 and t["off_step_va"] < -900 and len(t["shape"]) == 50 for t in kept)
+    assert len(json.dumps(kept[0]).encode()) < 1 << 20                 # fits the backend's body limit
+    entry = lib.get("Heater")
+    assert entry is not None and len(entry.on_examples) == 5 and entry.room == "Bedroom" and saved
+    assert "heater" in g.channels and pipe.teach is None
+    # while registering, the heater was never classified or posted as another device
+    assert not [p for path, p in posted if path.endswith("/readings") and p["device_id"] in ("kettle", "fridge")
+                and p["apparent_power_va"] > 0]
+
+
+def test_cancelling_in_the_app_stops_the_registration(library):
+    wanted = {"now": REG}
+    lib = Library(list(library.devices))
+    g, pipe, posted, _ = register(lib, [(30, OFF), (120, HEATER), (60, OFF)], wanted)
+    assert pipe.teach is not None and g.registration == "ab12"
+    wanted["now"] = None
+    g.feed(cycles_from([(1, OFF)], start=10_000)[0])
+    assert pipe.teach is None and g.registration is None and lib.get("Heater") is None
+
+
+def test_a_bad_room_fails_the_registration(library):
+    g, pipe, posted, _ = register(Library(), [(5, OFF)], {"now": {**REG, "room": "x" * 30}})
+    status = [p for path, p in posted if path.endswith("/status")]
+    assert status[0]["status"] == "failed" and pipe.teach is None

@@ -1,7 +1,8 @@
 """Teach mode and the device library.
 
-A TeachSession collects 3-5 good switch-on and switch-off rounds for one device and drops odd rounds.
-finish() gives a DeviceEntry: the rounds (examples for the classifier) and a fixed baseline (fault monitor).
+A TeachSession (registration) collects exactly 5 turns for one device: one switch-on plus its switch-off each.
+An odd turn is redone; kept turns stay. Each turn keeps its raw waveform.
+finish() gives a DeviceEntry: the turns (examples for the classifier) and a fixed baseline (fault monitor).
 The Library holds every DeviceEntry plus the working examples, and saves to library.json.
 """
 import json
@@ -77,8 +78,60 @@ def base_name(label: str) -> str:
     return label.split("|")[0]
 
 
+@dataclass
+class Turn:
+    """What one switch did during registration. A kept turn is one switch-on plus its matching switch-off.
+
+    status: "kept"     the turn counts (number 1 to 5)
+            "waiting"  a good switch-on; now switch the device off
+            "redo"     the switch-on and switch-off did not make a good turn; do it again
+            "refused"  this switch could not be used (lost readings, never settled, other loads...)
+            "ignored"  a switch-off with no switch-on before it, or a switch after the last turn
+    waveform: the raw clamp readings of both switches, for a kept or redo turn.
+    """
+    status: str
+    message: str
+    number: int | None = None
+    on: Signature | None = None
+    off: Signature | None = None
+    waveform: dict | None = None
+
+
+def _cycles(cycles) -> list[list[float]]:
+    return [[round(r, 4) for r in c.readings] for c in cycles]
+
+
+def raw_waveform(on_event, off_event) -> dict | None:
+    """The raw readings of one turn: 10 cycles before and every cycle after each switch, as the board sent them.
+    Example: a kettle that settles in 60 cycles gives on = 10 + 60 cycles and off = 10 + 50 cycles."""
+    if on_event is None or off_event is None:
+        return None
+    first = (on_event.before or on_event.after)[0]
+
+    def part(e):
+        return {"t_ms": e.t_ms, "before": _cycles(e.before), "after": _cycles(e.after)}
+    return {"readings_per_cycle": len(first.readings), "on": part(on_event), "off": part(off_event)}
+
+
+def _refusal(sig: Signature) -> str | None:
+    if not sig.clean:
+        return "readings were lost"
+    if not sig.settled:
+        return "the device never settled"
+    if not sig.shape_ok:
+        return "no shape could be read"
+    if sig.low_trust:
+        return "other big loads are on; switch them off"
+    return None
+
+
 class TeachSession:
-    """add() each signature while the user switches the device on and off."""
+    """Registration: exactly settings.teach_turns (5) turns. add() each signature while the user switches the
+    device on, waits for it to settle, then switches it off.
+
+    A turn is kept only when its switch-on and switch-off are both usable, the switch-off removes about what the
+    switch-on added, and both look like the turns already kept. A turn that does not is a redo: the turns
+    already kept stay. Refused switches do not count. After settings.max_redos redos the device varies a lot."""
 
     def __init__(self, name: str, settings: Settings, setting: str | None = None,
                  kind: str = "generic", room: str = "Living room"):
@@ -87,61 +140,94 @@ class TeachSession:
             raise ValueError(f"room must be 1 to {ROOM_MAX} characters, as named in the app")
         self.name, self.setting, self.settings = name, setting, settings
         self.kind, self.room = kind, room
-        self.on: list[Signature] = []
-        self.off: list[Signature] = []
-        self.rounds = 0   # switch-on attempts; a round is one on + off
+        self.turns: list[Turn] = []          # kept turns only
+        self.pending = None                  # (switch-on signature, its event) waiting for its switch-off
+        self.redos = 0
 
-    def add(self, sig: Signature) -> str:
-        if sig.direction > 0:
-            self.rounds += 1
-        if not sig.clean:
-            msg = "refused: readings were lost, do one more round"
-        elif not sig.settled:
-            msg = "refused: the device never settled, do one more round"
-        elif not sig.shape_ok:
-            msg = "refused: no shape, do one more round"
-        elif sig.low_trust:
-            msg = "refused: other big loads are on; switch them off and do one more round"
-        else:
-            group = self.on if sig.direction > 0 else self.off
-            group.append(sig)
-            odd = self._drop_odd(group)
-            msg = f"odd round dropped ({odd}), do one more round" if odd else "kept"
-        if self.ready:
-            return msg + "; enough rounds, you can finish"
-        if self.rounds >= self.settings.max_rounds:
-            return msg + "; this device varies a lot, stopping"
-        return msg
+    @property
+    def target(self) -> int:
+        return self.settings.teach_turns
 
-    def _drop_odd(self, group: list[Signature]) -> int:
-        """Odd = further from the middle than 3 x MAD, never less than a floor. Checked from 3 rounds."""
-        if len(group) < 3:
-            return 0
-        steps = [abs(s.step_va) for s in group]
-        mid_step = statistics.median(steps)
-        step_lim = max(3 * mad(steps), MAINS_V * self.settings.threshold_a)
-        # The median shape here, so one odd round cannot drag the middle; finish() uses the mean of good rounds.
-        mid_shape = np.median([s.steady for s in group], axis=0)
-        dists = [shape_distance(s.steady, mid_shape) for s in group]
-        shape_lim = max(3 * mad(dists), self.settings.shape_floor)
-        keep = [s for s, st, d in zip(group, steps, dists)
-                if abs(st - mid_step) <= step_lim and d <= shape_lim]
-        dropped = len(group) - len(keep)
-        group[:] = keep
-        return dropped
+    @property
+    def on(self) -> list[Signature]:
+        return [t.on for t in self.turns]
+
+    @property
+    def off(self) -> list[Signature]:
+        return [t.off for t in self.turns]
 
     @property
     def ready(self) -> bool:
-        return len(self.on) >= self.settings.min_rounds and len(self.off) >= self.settings.min_rounds
+        return len(self.turns) >= self.target
 
     @property
     def varies(self) -> bool:
-        return not self.ready and self.rounds >= self.settings.max_rounds
+        return not self.ready and self.redos >= self.settings.max_redos
+
+    def add(self, sig: Signature, event=None) -> Turn:
+        n = len(self.turns) + 1
+        if self.ready:
+            return Turn("ignored", f"all {self.target} turns are done")
+        why = _refusal(sig)
+        if sig.direction > 0:
+            if why:
+                return Turn("refused", f"switch-on refused: {why}. Switch it off, then do turn {n} again.", n)
+            replaced = self.pending is not None
+            self.pending = (sig, event)
+            note = " The switch-on before it had no switch-off, so it was replaced." if replaced else ""
+            return Turn("waiting", f"turn {n}: switched on ({sig.step_va:+.0f} VA). Now switch it off.{note}", n, sig)
+        if self.pending is None:
+            return Turn("ignored", f"a switch-off with no switch-on before it. Switch the device on to start turn {n}.")
+        on, on_event = self.pending
+        self.pending = None
+        wave = raw_waveform(on_event, event)
+        problem = f"switch-off refused: {why}" if why else (self._mismatch(on, sig) or self._odd(on, sig))
+        if problem:
+            self.redos += 1
+            msg = f"turn {n} redo: {problem}. Do turn {n} again."
+            if self.varies:
+                msg += " This device varies a lot; stopping."
+            return Turn("redo", msg, n, on, sig, wave)
+        turn = Turn("kept", f"turn {n} of {self.target} kept ({on.step_va:+.0f} VA on, {sig.step_va:+.0f} VA off)",
+                    n, on, sig, wave)
+        self.turns.append(turn)
+        if self.ready:
+            turn.message += f"; all {self.target} turns done"
+        return turn
+
+    def _step_limit(self, steps) -> float:
+        floor = MAINS_V * self.settings.threshold_a
+        return max(3 * mad(steps), floor) if len(steps) > 1 else floor
+
+    def _mismatch(self, on: Signature, off: Signature) -> str | None:
+        """The switch-off should remove what the switch-on added. Example: on +2000 VA, off -1700 VA -> redo."""
+        a, b = abs(on.step_va), abs(off.step_va)
+        limit = max(self.settings.power_tolerance_frac * a, MAINS_V * self.settings.threshold_a)
+        if abs(a - b) > limit:
+            return (f"the switch-off ({b:.0f} VA) did not match the switch-on ({a:.0f} VA); "
+                    "something else may have changed")
+        return None
+
+    def _odd(self, on: Signature, off: Signature) -> str | None:
+        """Compared with the kept turns: power step within 3 x MAD of their middle (never less than the noise
+        floor), and shape within 3 x MAD of their middle shape (never less than shape_floor)."""
+        if not self.turns:
+            return None
+        for word, new, kept in (("switch-on", on, self.on), ("switch-off", off, self.off)):
+            steps = [abs(s.step_va) for s in kept]
+            mid_step = statistics.median(steps)
+            if abs(abs(new.step_va) - mid_step) > self._step_limit(steps):
+                return f"the {word} power ({abs(new.step_va):.0f} VA) is far from the other turns (about {mid_step:.0f} VA)"
+            mid = np.median([s.steady for s in kept], axis=0)
+            spread = [shape_distance(s.steady, mid) for s in kept]
+            limit = max(3 * mad(spread), self.settings.shape_floor) if len(kept) > 1 else self.settings.shape_floor
+            if shape_distance(new.steady, mid) > limit:
+                return f"the {word} shape is different from the other turns"
+        return None
 
     def finish(self) -> DeviceEntry:
         if not self.ready:
-            raise ValueError(f"need {self.settings.min_rounds} good on- and off-rounds, "
-                             f"have {len(self.on)} on and {len(self.off)} off")
+            raise ValueError(f"need {self.target} kept turns, have {len(self.turns)}")
         on = self.on
         shape = np.mean([s.steady for s in on], axis=0)
         surge = np.mean([s.surge for s in on], axis=0)

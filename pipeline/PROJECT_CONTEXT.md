@@ -45,7 +45,8 @@ Base paper: Jayakrishnan B et al., "Real-Time NILM-Based Smart Energy Monitoring
 | Each device's own signals over weeks | From every event | Fault prediction (drift from baseline) |
 
 ### Registration (teach mode)
-- User taps "add device", names it, switches it on and off 3-5 times; nothing else in the house should change.
+- User taps "Register device" in the app, names it, and does 5 turns (switch on, let it settle, switch off); nothing else in the house should change.
+- Each turn is stored with its raw waveform (10 cycles before and every cycle after both switches).
 - Each switch-on saves one record:
   - name (the label TimEE returns), event type (on/off), optional setting (e.g. "speed 3")
   - steady shape: 10 settled cycles, aligned at upward zero crossing, averaged into one cycle, scaled to unit size (~100 numbers at 5 kHz)
@@ -54,7 +55,7 @@ Base paper: Jayakrishnan B et al., "Real-Time NILM-Based Smart Energy Monitoring
 - Each switch-off saves the steady signal as it disappears plus the power drop.
 - All 5 records are stored separately as TimEE examples. Do not average them for classification.
 - Per-device summary: average shape (fixed fault baseline, never shown to TimEE) and typical power step with tolerance (e.g. 2000 W +/- 50 W).
-- During teach mode, drop any round that looks very different from the others and ask for one more.
+- During registration, a turn that looks very different from the kept turns is redone; kept turns stay.
 - Device settings (e.g. mixer speeds): register each setting under the same device name.
 
 ### Detecting switch-on

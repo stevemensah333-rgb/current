@@ -14,7 +14,7 @@ CHARGER = shape(wave(0.15, third=0.6))
 
 def device(name, step, steady):
     t = TeachSession(name, S)
-    for i in range(3):
+    for i in range(5):
         t.add(sig(step + 5 * i, steady))
         t.add(sig(step + 5 * i, steady, direction=-1))
     return t.finish()

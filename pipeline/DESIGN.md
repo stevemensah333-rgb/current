@@ -150,17 +150,23 @@ The first cycle after which `current_a` stays within `threshold_a` of the settle
 The 5 on-signatures and 5 off-signatures are stored as separate examples. A summary of them becomes the
 kettle's fixed baseline for the fault monitor.
 
-### Rounds
+### Turns
+
+A turn is one switch-on followed by its switch-off. Registration needs exactly 5 kept turns.
 
 ```
 session = TeachSession("kettle", setting=None)
-for each signature during teaching:
-  refuse it (and ask for one more round) if: not clean, not settled, not shape_ok, or low_trust
+for each signature during registration:
+  refuse it if: not clean, not settled, not shape_ok, or low_trust     # refused switches do not count
                                              # low_trust → "switch off other big loads and try again"
-  store on-rounds and off-rounds separately
-  once there are 3 on-rounds, check for odd rounds (on and off separately)
-  stop after 8 switch-on attempts and report "this device varies a lot" if enough good rounds were never reached
-session.finish(): needs ≥ 3 good on-rounds and ≥ 3 good off-rounds (PROJECT_CONTEXT: 3–5)
+  switch-on  → hold it and ask for the switch-off
+  switch-off → with the held switch-on it makes a turn. Redo the turn if:
+               the off step is not about the on step (10 % or the noise floor), or
+               its power or shape is odd compared with the turns already kept (kept turns always stay)
+  stop after 5 redos and report "this device varies a lot"
+session.finish(): needs 5 kept turns → 5 on- and 5 off-examples
+Each turn also keeps its raw waveform: 10 cycles before and every cycle after both switches.
+The app stores it with the turn (registration_turns table in the backend database).
 ```
 
 **Odd-round rule, with numbers.** Steps of 2000, 2010 and 2500 VA. The middle value is 2010. Distances from
