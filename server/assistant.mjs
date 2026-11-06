@@ -1,5 +1,6 @@
 // The household assistant. One question at a time runs as a job, because the local model can take minutes.
-// Two providers behind one loop: "local" (LFM3-1.7B in LM Studio) and "cloud" (Claude Opus 5.5).
+// Two providers behind one loop: "local" (LFM3-1.7B in LM Studio) and "cloud".
+// Cloud is DeepSeek for now (NILM_CLOUD=deepseek, the default); NILM_CLOUD=claude switches back to Claude Opus 5.5.
 // The model sees only a state line built here from device ids and numbers, never free text from a gateway.
 import {randomBytes} from 'node:crypto'
 import Anthropic from '@anthropic-ai/sdk'
@@ -10,10 +11,18 @@ import {ApiError,fail,object,keys,text} from './validation.mjs'
 const withLimit=(signal,ms)=>signal?AbortSignal.any([signal,AbortSignal.timeout(ms)]):AbortSignal.timeout(ms)
 export const LOCAL_URL=process.env.NILM_LM_URL||'http://localhost:8000'
 export const LOCAL_MODEL=process.env.NILM_LM_MODEL||'lfm3-1.7b'
-export const CLOUD_MODEL='claude-opus-5-5'
+export const CLAUDE_MODEL='claude-opus-5-5'
+export const DEEPSEEK_URL=process.env.DEEPSEEK_URL||'https://api.deepseek.com'
+export const DEEPSEEK_MODEL=process.env.DEEPSEEK_MODEL||'deepseek-chat'
+export const CLOUD_PROVIDER=process.env.NILM_CLOUD==='claude'?'claude':'deepseek'
+export const CLOUD_MODEL=CLOUD_PROVIDER==='claude'?CLAUDE_MODEL:DEEPSEEK_MODEL
+/** Whether the cloud key for the chosen cloud provider is set (the key itself never leaves the server). */
+export const cloudReady=()=>Boolean(CLOUD_PROVIDER==='claude'?process.env.ANTHROPIC_API_KEY:process.env.DEEPSEEK_API_KEY)
 const MAX_ROUNDS={local:3,cloud:5}
 const LOCAL_MAX_TOKENS=2048        // the LFM3 model card's max_new_tokens; also bounds its reasoning
 const LOCAL_CALL_MS=5*60000        // one local model call may take at most 5 minutes
+const DEEPSEEK_MAX_TOKENS=2048
+const DEEPSEEK_CALL_MS=2*60000
 const CONFIRM_MS=5*60000
 const PERIOD_HOURS={hour:1,'24h':24,week:168}
 
@@ -52,8 +61,34 @@ export function parseXmlToolCalls(textValue){
  return [...textValue.matchAll(TOOL_CALL)].map((m,i)=>({id:`call_${i}`,name:m[1].trim(),input:Object.fromEntries([...m[2].matchAll(PARAMETER)].map(p=>[p[1].trim(),p[2]]))}))
 }
 
+const LOCAL_ERRORS={
+ timeout:()=>'The local model took longer than 5 minutes. Try a shorter question, or use Cloud.',
+ unreachable:()=>'The local model is not reachable. Start LM Studio: lms server start, then lms load lfm3-1.7b.',
+ status:code=>`The local model answered with an error (${code}).`,
+ unreadable:()=>'The local model sent an answer that could not be read.'}
+const DEEPSEEK_ERRORS={
+ timeout:()=>'DeepSeek took longer than 2 minutes. Try again.',
+ unreachable:()=>'DeepSeek is not reachable. Check the internet connection.',
+ status:code=>code===401?'The cloud key was refused. Check DEEPSEEK_API_KEY in .env.':code===402?'The DeepSeek account has no balance left.':code===429?'DeepSeek is busy (rate limited). Try again in a minute.':`DeepSeek answered with an error (${code}).`,
+ unreadable:()=>'DeepSeek sent an answer that could not be read.'}
+
 /** Local provider: an OpenAI-style chat endpoint (LM Studio). */
 export function localChat({url=LOCAL_URL,model=LOCAL_MODEL,fetchImpl=fetch}={}){
+ return openAiChat({url:`${url}/v1/chat/completions`,model,fetchImpl,maxTokens:LOCAL_MAX_TOKENS,callMs:LOCAL_CALL_MS,errors:LOCAL_ERRORS})
+}
+
+/** Cloud provider (default): DeepSeek's OpenAI-compatible chat API. */
+export function deepseekChat({url=DEEPSEEK_URL,model=DEEPSEEK_MODEL,apiKey,fetchImpl=fetch}={}){
+ const run=openAiChat({url:`${url}/chat/completions`,model,fetchImpl,maxTokens:DEEPSEEK_MAX_TOKENS,callMs:DEEPSEEK_CALL_MS,errors:DEEPSEEK_ERRORS,
+  key:()=>apiKey||process.env.DEEPSEEK_API_KEY})
+ return async args=>{
+  if(!apiKey&&!process.env.DEEPSEEK_API_KEY)throw new ApiError(503,'Cloud is not set up: add DEEPSEEK_API_KEY to .env and restart.')
+  return run(args)
+ }
+}
+
+/** One loop for any OpenAI-style chat endpoint (LM Studio, DeepSeek). */
+function openAiChat({url,model,fetchImpl,maxTokens,callMs,errors,key=()=>null}){
  return async function run({system,user,specs,execute,signal,maxRounds}){
   const messages=[{role:'system',content:system},{role:'user',content:user}]
   const tools=specs.map(s=>({type:'function',function:{name:s.name,description:s.description,parameters:s.schema}}))
@@ -63,16 +98,17 @@ export function localChat({url=LOCAL_URL,model=LOCAL_MODEL,fetchImpl=fetch}={}){
   for(let round=0;round<=maxRounds;round++){
    const offerTools=round<maxRounds&&tools.length>0
    let response
-   try{response=await fetchImpl(`${url}/v1/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json'},signal:withLimit(signal,LOCAL_CALL_MS),body:JSON.stringify({model,messages,temperature:.1,max_tokens:LOCAL_MAX_TOKENS,
+   const headers={'Content-Type':'application/json'},k=key();if(k)headers.Authorization=`Bearer ${k}`
+   try{response=await fetchImpl(url,{method:'POST',headers,signal:withLimit(signal,callMs),body:JSON.stringify({model,messages,temperature:.1,max_tokens:maxTokens,
     ...(tools.length?{tools,tool_choice:offerTools?'auto':'none'}:{})})})}
    catch(e){
     if(signal?.aborted)throw e
-    if(e?.name==='TimeoutError')throw new ApiError(504,'The local model took longer than 5 minutes. Try a shorter question, or use Cloud.')
-    throw new ApiError(503,'The local model is not reachable. Start LM Studio: lms server start, then lms load lfm3-1.7b.')
+    if(e?.name==='TimeoutError')throw new ApiError(504,errors.timeout())
+    throw new ApiError(503,errors.unreachable())
    }
-   if(!response.ok)throw new ApiError(502,`The local model answered with an error (${response.status}).`)
+   if(!response.ok)throw new ApiError(502,errors.status(response.status))
    const msg=(await response.json().catch(()=>null))?.choices?.[0]?.message
-   if(!msg)throw new ApiError(502,'The local model sent an answer that could not be read.')
+   if(!msg)throw new ApiError(502,errors.unreadable())
    const parse=args=>{try{return JSON.parse(args||'{}')}catch{return null}}   // null = malformed; reported back to the model
    let content=msg.content||'',calls=(msg.tool_calls||[]).map(c=>({id:c.id,name:c.function?.name,input:parse(c.function?.arguments)}))
    if(!calls.length&&content.includes('<tool_call>')){calls=parseXmlToolCalls(content);content=content.replace(TOOL_CALL,'').trim()}
@@ -84,7 +120,7 @@ export function localChat({url=LOCAL_URL,model=LOCAL_MODEL,fetchImpl=fetch}={}){
  }
 }
 
-/** Cloud provider: Claude through the official SDK, with Anthropic's automatic fallback for declined requests. */
+/** Alternative cloud provider (NILM_CLOUD=claude): Claude through the official SDK, with Anthropic's automatic fallback for declined requests. */
 export function cloudChat({client}={}){
  return async function run({system,user,specs,execute,signal,maxRounds}){
   if(!client&&!process.env.ANTHROPIC_API_KEY)throw new ApiError(503,'Cloud is not set up: add ANTHROPIC_API_KEY to .env and restart.')
@@ -98,7 +134,7 @@ export function cloudChat({client}={}){
    const offerTools=round<maxRounds&&tools.length>0
    let response
    try{
-    response=await claude.beta.messages.create({model:CLOUD_MODEL,max_tokens:16000,system,messages,
+    response=await claude.beta.messages.create({model:CLAUDE_MODEL,max_tokens:16000,system,messages,
      ...(tools.length?{tools,tool_choice:{type:offerTools?'auto':'none'}}:{}),
      output_config:{effort:'low'},betas:['server-side-fallback-2026-07-01'],fallbacks:'default'},{signal})
    }catch(e){
@@ -122,7 +158,7 @@ export function cloudChat({client}={}){
  }
 }
 
-export function createAssistant(service,{clock=()=>Date.now(),providers={local:localChat(),cloud:cloudChat()}}={}){
+export function createAssistant(service,{clock=()=>Date.now(),providers={local:localChat(),cloud:CLOUD_PROVIDER==='claude'?cloudChat():deepseekChat()}}={}){
  const jobs=new Map(),confirms=new Map();let running=null
 
  function periodStart(period){

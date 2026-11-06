@@ -9,7 +9,7 @@ type Turn={question:string;job:Job|null;note?:string}
 const EXAMPLES=['What is on right now?','How long was the kettle on today?','Is any device showing a problem?']
 const PROVIDERS:{id:Provider;label:string;note:string}[]=[
  {id:'local',label:'This computer',note:'Private: nothing leaves this computer. An answer can take 1–3 minutes.'},
- {id:'cloud',label:'Cloud',note:'Faster. Your home’s readings are sent to Anthropic’s Claude.'}
+ {id:'cloud',label:'Cloud',note:'Faster. Your home’s readings are sent to DeepSeek.'}
 ]
 
 /** Models often mark words as **bold**; show that as bold text, nothing else (no HTML is ever inserted). */
@@ -92,6 +92,6 @@ export function AssistantPanel({close}:{close:()=>void}){
    {running?<button type="button" className="outline full" onClick={()=>void cancel()}>Cancel</button>:<button className="primary full" disabled={!message.trim()||cloudMissing}>Ask</button>}
   </form>
   <p className="quiet-note">Switching off always asks you first.</p>
-  <details className="more-details"><summary>Technical details</summary><div><p>This computer: LFM3-1.7B in LM Studio. Cloud: Claude, by Anthropic.</p><p>Power values are estimates from one current clamp.</p>{cloudMissing&&<p>To use the cloud, add ANTHROPIC_API_KEY to the .env file and restart the app.</p>}</div></details>
+  <details className="more-details"><summary>Technical details</summary><div><p>This computer: LFM3-1.7B in LM Studio. Cloud: {s.telemetry?.ai.cloud_name==='claude'?'Claude, by Anthropic':'DeepSeek'}.</p><p>Power values are estimates from one current clamp.</p>{cloudMissing&&<p>To use the cloud, add {s.telemetry?.ai.cloud_name==='claude'?'ANTHROPIC_API_KEY':'DEEPSEEK_API_KEY'} to the .env file and restart the app.</p>}</div></details>
  </FloatingCard>
 }

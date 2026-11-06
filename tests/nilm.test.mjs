@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {openDatabase} from '../server/database.mjs'
 import {createService} from '../server/service.mjs'
-import {createAssistant,stateLine,parseXmlToolCalls,localChat,cloudChat,systemPrompt} from '../server/assistant.mjs'
+import {createAssistant,stateLine,parseXmlToolCalls,localChat,cloudChat,deepseekChat,systemPrompt} from '../server/assistant.mjs'
 import {createApp} from '../server/index.mjs'
 import {realPower,energyBetween} from '../shared/calculations.ts'
 
@@ -164,6 +164,21 @@ test('cloud adapter: tool_use loop, refusal, fallbacks and a missing key',async(
  finally{if(saved!==undefined)process.env.ANTHROPIC_API_KEY=saved}
 })
 
+test('deepseek adapter: bearer key, tool loop, clear errors and a missing key',async()=>{
+ const replies=[{tool_calls:[{id:'1',function:{name:'get_usage',arguments:'{"device":"kettle","period":"today"}'}}]},{content:'About 20 minutes.'}]
+ const seen=[];const fetchImpl=async(url,opts)=>{seen.push({url,headers:opts.headers,body:JSON.parse(opts.body)});return {ok:true,json:async()=>({choices:[{message:replies.shift()}]})}}
+ const out=await deepseekChat({apiKey:'k1',fetchImpl})({system:'s',user:'u',specs:SPEC,execute:async()=>'kettle: 0.33 h on',maxRounds:5})
+ assert.equal(out,'About 20 minutes.')
+ assert.equal(seen[0].url,'https://api.deepseek.com/chat/completions');assert.equal(seen[0].headers.Authorization,'Bearer k1')
+ assert.equal(seen[0].body.model,'deepseek-chat');assert.equal(seen[1].body.messages.at(-1).role,'tool')
+ const refused=deepseekChat({apiKey:'bad',fetchImpl:async()=>({ok:false,status:401})})
+ await assert.rejects(refused({system:'s',user:'u',specs:[],execute:async()=>'',maxRounds:5}),/DEEPSEEK_API_KEY/)
+ const down=deepseekChat({apiKey:'k',fetchImpl:async()=>{throw new TypeError('fetch failed')}})
+ await assert.rejects(down({system:'s',user:'u',specs:[],execute:async()=>'',maxRounds:5}),/DeepSeek is not reachable/)
+ const saved=process.env.DEEPSEEK_API_KEY;delete process.env.DEEPSEEK_API_KEY
+ try{await assert.rejects(deepseekChat()({system:'s',user:'u',specs:[],execute:async()=>'',maxRounds:5}),/Cloud is not set up: add DEEPSEEK_API_KEY/)}
+ finally{if(saved!==undefined)process.env.DEEPSEEK_API_KEY=saved}
+})
 
 // Review fixes
 

@@ -2,9 +2,10 @@ import {randomBytes} from 'node:crypto'
 import {hash,config,simulation,allDevices,putDevice} from './database.mjs'
 import {ApiError,fail,object,keys,id,text,number,optionalNumber,bool,oneOf,deviceInput,readingInput,alertInput,healthInput,providers} from './validation.mjs'
 import {realPower,energyBetween,backupEstimate,costAtRate,isApparent} from '../shared/calculations.ts'
+import {CLOUD_MODEL,CLOUD_PROVIDER,LOCAL_MODEL,cloudReady} from './assistant.mjs'
 
 // What the app shows about the assistant. cloud_ready: a key is set on the server (the key itself never leaves it).
-export const assistantInfo=provider=>({enabled:true,provider,model:provider==='cloud'?'claude-opus-5-5':(process.env.NILM_LM_MODEL||'lfm3-1.7b'),cloud_ready:Boolean(process.env.ANTHROPIC_API_KEY)})
+export const assistantInfo=provider=>({enabled:true,provider,model:provider==='cloud'?CLOUD_MODEL:LOCAL_MODEL,cloud_name:CLOUD_PROVIDER,cloud_ready:cloudReady()})
 export function createService(db,{clock=()=>Date.now()}={}){
  const now=()=>new Date(clock()).toISOString()
  const getDevice=deviceId=>{const row=db.prepare('SELECT metadata,active FROM devices WHERE id=?').get(deviceId);if(!row||!row.active)fail('Device not found',404);return JSON.parse(row.metadata)}
