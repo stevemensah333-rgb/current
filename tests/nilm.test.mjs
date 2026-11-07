@@ -40,7 +40,7 @@ test('snapshot labels VA, computes "not yet named" from fresh parts only, and la
  f.mains(2093,0);f.kettle(2000,.94,0);f.advance(5000);f.mains(2093,0);f.kettle(2000,.94,0)
  let s=f.service.snapshot()
  assert.equal(s.demand_basis,'apparent_estimate_va');assert.equal(Math.round(s.unnamed_va),93)
- assert.match(s.cost_basis,/Estimated from current at 230 V/)
+ assert.match(s.cost_basis,/ECG tariff, effective 1 April 2026/);assert.match(s.cost_basis,/estimated from current at 230 V/)
  assert.equal(s.devices.find(d=>d.id==='kettle').energy_methods.includes('integrated_apparent_va'),true)
  f.advance(31000);f.mains(1000,0)                       // kettle channel now stale
  s=f.service.snapshot();assert.equal(s.unnamed_va,null)

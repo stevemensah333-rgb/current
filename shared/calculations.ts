@@ -37,6 +37,52 @@ export function backupEstimate(loadW:number|null,soc:number|null,config:BatteryC
 }
 export function costAtRate(energyWh:number|null,pricePerKwh:number|null){return energyWh==null||pricePerKwh==null?null:energyWh/1000*pricePerKwh}
 
+// --- ECG tariff (PURC Electricity Tariff Reckoner, effective 1 April 2026) ------------------------------------
+// For E kWh in a month:
+//   energy  = 1.9688 x min(E, 300) + 2.6015 x max(E - 300, 0)        (residential; non-residential 1.7775 / 2.1649)
+//   street light = 3 % of energy, national electrification levy = 2 % of energy
+//   service = 2.13 if E <= 30 (lifeline) else 10.73                   (residential; non-residential always 12.43)
+//   non-residential only: NHIL & GETFund = 5 % of (energy + service), VAT = 15 % of (energy + service)
+//   residential lifeline (E <= 30): refund = 1.15479 x E, i.e. (1.9688 - 0.8690 lifeline rate) x 1.05 levies
+//   each part is rounded to the pesewa; total = sum of parts; net = total - refund
+// Example: 30 kWh residential = 59.06 + 1.77 + 1.18 + 2.13 = 64.14, minus refund 34.64 = GHS 29.50.
+export type TariffCategory='residential'|'non_residential'
+type TariffClass={blocks:{upto:number;rate:number}[];street_light:number;nel:number;service:number;lifeline_kwh:number;lifeline_service:number;lifeline_refund_per_kwh:number;nhil_getfund:number;vat:number}
+export const ECG_TARIFF={name:'ECG tariff, effective 1 April 2026',effective:'2026-04-01',
+ residential:{blocks:[{upto:300,rate:1.9688},{upto:Infinity,rate:2.6015}],street_light:.03,nel:.02,service:10.73,lifeline_kwh:30,lifeline_service:2.13,lifeline_refund_per_kwh:1.15479,nhil_getfund:0,vat:0},
+ non_residential:{blocks:[{upto:300,rate:1.7775},{upto:Infinity,rate:2.1649}],street_light:.03,nel:.02,service:12.43,lifeline_kwh:0,lifeline_service:12.43,lifeline_refund_per_kwh:0,nhil_getfund:.05,vat:.15}} as const satisfies {name:string;effective:string;residential:TariffClass;non_residential:TariffClass}
+export const DAYS_PER_MONTH=30          // a period's use is priced as its monthly equivalent, then scaled back
+const pesewas=(v:number)=>Math.round((v+Number.EPSILON)*100)/100
+
+/** One month's ECG bill for E kWh, part by part, as on the reckoner. */
+export function ecgBill(kwh:number,category:TariffCategory='residential'){
+ const t:TariffClass=ECG_TARIFF[category],e=Math.max(0,kwh)
+ let energy=0,from=0
+ for(const b of t.blocks){const part=Math.min(e,b.upto)-from;if(part<=0)break;energy+=part*b.rate;from=b.upto}
+ const lifeline=e<=t.lifeline_kwh,service=lifeline?t.lifeline_service:t.service
+ const parts={energy:pesewas(energy),street_light:pesewas(energy*t.street_light),nel:pesewas(energy*t.nel),service,
+  nhil_getfund:pesewas((energy+service)*t.nhil_getfund),vat:pesewas((energy+service)*t.vat)}
+ const total=pesewas(Object.values(parts).reduce((s,v)=>s+v,0)),refund=lifeline?pesewas(e*t.lifeline_refund_per_kwh):0
+ return {...parts,total,refund,net:pesewas(total-refund),lifeline}
+}
+/** What E kWh used over a number of days costs: priced as the monthly equivalent, then scaled to those days.
+ * Example: 3.97 kWh a day for 14 days -> 119 kWh a month -> GHS 256.8 a month -> GHS 119.8 for 14 days. */
+export function ecgCostForPeriod(kwh:number,days:number,category:TariffCategory='residential'){
+ return ecgBill(kwh*DAYS_PER_MONTH/days,category).net*days/DAYS_PER_MONTH
+}
+/** How many kWh a prepaid credit buys over a number of days: the inverse of ecgCostForPeriod. The bill only ever
+ * rises with use (it jumps at the 30 kWh lifeline edge), so halving the search finds the most kWh within the credit. */
+export function ecgKwhForCredit(amountGhs:number,days:number,category:TariffCategory='residential'){
+ if(ecgCostForPeriod(0,days,category)>amountGhs)return 0
+ let lo=0,hi=amountGhs/0.5+1
+ for(let i=0;i<60;i++){const mid=(lo+hi)/2;if(ecgCostForPeriod(mid,days,category)<=amountGhs)lo=mid;else hi=mid}
+ return lo
+}
+/** Average price per kWh at a month's use, with every charge and levy included. Example: 119 kWh -> GHS 2.16. */
+export function ecgAveragePrice(kwhPerMonth:number,category:TariffCategory='residential'){
+ return kwhPerMonth>0?ecgBill(kwhPerMonth,category).net/kwhPerMonth:null
+}
+
 // --- Prepaid credit rationing -------------------------------------------------------------------------------
 // Example: GHS 100 at GHS 1.80/kWh = 55.6 kWh. To last 14 days that is 3.97 kWh a day. The home uses 6.0 kWh a day,
 // so at this pace the credit lasts 9.3 days. The gap, 2.03 kWh a day, is closed by limiting hours of the biggest,

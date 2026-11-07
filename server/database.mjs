@@ -20,7 +20,7 @@ export function openDatabase(filename){
  return db
 }
 export function localToken(directory,name){const path=join(directory,name);if(!existsSync(path))writeFileSync(path,randomBytes(32).toString('hex'),{mode:0o600});chmodSync(path,0o600);return readFileSync(path,'utf8').trim()}
-export function config(db){const c=JSON.parse(db.prepare('SELECT payload FROM settings WHERE id=1').get().payload);c.assistant??={provider:'local'};return c}
+export function config(db){const c=JSON.parse(db.prepare('SELECT payload FROM settings WHERE id=1').get().payload);c.assistant??={provider:'local'};c.tariff??={scheme:'ecg',category:'residential'};return c}
 export function simulation(db){return JSON.parse(db.prepare('SELECT payload FROM simulation WHERE id=1').get().payload)}
 export function allDevices(db){return db.prepare('SELECT metadata FROM devices WHERE active=1 ORDER BY id').all().map(d=>JSON.parse(d.metadata))}
 export function putDevice(db,d){db.prepare('INSERT INTO devices(id,gateway_id,metadata) VALUES(?,?,?)').run(d.id,d.gateway_id,JSON.stringify(d))}

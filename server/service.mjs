@@ -1,11 +1,18 @@
 import {randomBytes} from 'node:crypto'
 import {hash,config,simulation,allDevices,putDevice} from './database.mjs'
 import {ApiError,fail,object,keys,id,text,number,optionalNumber,bool,oneOf,deviceInput,readingInput,alertInput,healthInput,providers} from './validation.mjs'
-import {realPower,energyBetween,backupEstimate,costAtRate,isApparent} from '../shared/calculations.ts'
+import {realPower,energyBetween,backupEstimate,costAtRate,isApparent,ECG_TARIFF,ecgCostForPeriod,ecgAveragePrice} from '../shared/calculations.ts'
 import {CLOUD_MODEL,CLOUD_PROVIDER,LOCAL_MODEL,cloudReady} from './assistant.mjs'
 
 // What the app shows about the assistant. cloud_ready: a key is set on the server (the key itself never leaves it).
 export const assistantInfo=provider=>({enabled:true,provider,model:provider==='cloud'?CLOUD_MODEL:LOCAL_MODEL,cloud_name:CLOUD_PROVIDER,cloud_ready:cloudReady()})
+/** The price that applies to the home's use. ECG: the last 24 hours' energy priced as its monthly equivalent
+ * (a day at 4 kWh -> a 120 kWh month -> GHS 2.16 per kWh with every charge). Flat: the price the user entered. */
+export function tariffView(cfg,energyWh){
+ const kwhDay=energyWh==null?null:energyWh/1000,category=cfg.tariff.category
+ if(cfg.tariff.scheme==='flat')return {scheme:'flat',name:'Your own price per kWh',category,average_price_ghs_per_kwh:cfg.rates.grid,day_cost_ghs:costAtRate(energyWh,cfg.rates.grid)}
+ return {scheme:'ecg',name:ECG_TARIFF.name,category,average_price_ghs_per_kwh:kwhDay==null?null:ecgAveragePrice(kwhDay*30,category),day_cost_ghs:kwhDay==null?null:ecgCostForPeriod(kwhDay,1,category)}
+}
 export function createService(db,{clock=()=>Date.now()}={}){
  const now=()=>new Date(clock()).toISOString()
  const getDevice=deviceId=>{const row=db.prepare('SELECT metadata,active FROM devices WHERE id=?').get(deviceId);if(!row||!row.active)fail('Device not found',404);return JSON.parse(row.metadata)}
@@ -62,11 +69,14 @@ export function createService(db,{clock=()=>Date.now()}={}){
   // How the home total was obtained; "apparent_estimate_va" means VA from a current clamp, not watts.
   const demandBasis=main?main.power_basis:fresh.length?fresh[0].power_basis:'unavailable'
   const apparent=isApparent(demandBasis)
-  const costBasis=apparent?'Estimated kWh × grid rate. Estimated from current at 230 V, so it can read a little high; check it against your meter.':'Energy at current configured grid rate; not a mixed-source bill'
+  const costBasis=config(db).tariff.scheme==='ecg'?`${ECG_TARIFF.name}: energy blocks, levies and service charge for this use, scaled to the day.${apparent?' Energy is estimated from current at 230 V, so it can read a little high; check it against your meter.':''}`:apparent?'Estimated kWh × grid rate. Estimated from current at 230 V, so it can read a little high; check it against your meter.':'Energy at current configured grid rate; not a mixed-source bill'
   const cfgNow=config(db)
-  return {schema_version:1,as_of:now(),window_hours:24,devices,settings:cfgNow,simulation:simulation(db),demand_w:demand,demand_basis:demandBasis,unnamed_va:unnamed,alerts:openAlerts(),health:healthList(),demand_scope:main?'whole_home':'monitored_appliances',monitored_power_w:fresh.length?fresh.reduce((s,d)=>s+d.power_w,0):null,unattributed_power_w:main?.power_w!=null&&fresh.length?Math.max(0,main.power_w-fresh.reduce((s,d)=>s+d.power_w,0)):null,energy_wh:totalEnergy,cost_at_grid_rate_ghs:costAtRate(totalEnergy,config(db).rates.grid),cost_basis:costBasis,sources:Object.fromEntries(Object.entries(sourceDevices).map(([role,d])=>[role,d?.power_w??null])),battery_soc_pct:battery?.fresh?battery.latest?.battery_soc_pct??null:null,data_quality:{missing_channels:devices.filter(d=>!d.fresh||d.power_w==null).map(d=>d.id),inferred_channels:devices.filter(d=>d.measurement_kind==='inferred').map(d=>d.id),unknown_energy_intervals:devices.reduce((s,d)=>s+d.unknown_intervals,0)},ai:assistantInfo(cfgNow.assistant.provider)}
+  const tariff=tariffView(cfgNow,totalEnergy)
+  if(tariff.average_price_ghs_per_kwh!=null)for(const d of devices)d.cost_at_grid_rate_ghs=d.energy_wh==null?null:d.energy_wh/1000*tariff.average_price_ghs_per_kwh
+  return {schema_version:1,as_of:now(),window_hours:24,devices,settings:cfgNow,simulation:simulation(db),demand_w:demand,demand_basis:demandBasis,unnamed_va:unnamed,alerts:openAlerts(),health:healthList(),demand_scope:main?'whole_home':'monitored_appliances',monitored_power_w:fresh.length?fresh.reduce((s,d)=>s+d.power_w,0):null,unattributed_power_w:main?.power_w!=null&&fresh.length?Math.max(0,main.power_w-fresh.reduce((s,d)=>s+d.power_w,0)):null,energy_wh:totalEnergy,cost_at_grid_rate_ghs:tariff.day_cost_ghs,cost_basis:costBasis,tariff,sources:Object.fromEntries(Object.entries(sourceDevices).map(([role,d])=>[role,d?.power_w??null])),battery_soc_pct:battery?.fresh?battery.latest?.battery_soc_pct??null:null,data_quality:{missing_channels:devices.filter(d=>!d.fresh||d.power_w==null).map(d=>d.id),inferred_channels:devices.filter(d=>d.measurement_kind==='inferred').map(d=>d.id),unknown_energy_intervals:devices.reduce((s,d)=>s+d.unknown_intervals,0)},ai:assistantInfo(cfgNow.assistant.provider)}
  }
- function updateSettings(raw){const v=object(raw);keys(v,['battery','rates','assistant']);const cfg=config(db)
+ function updateSettings(raw){const v=object(raw);keys(v,['battery','rates','assistant','tariff']);const cfg=config(db)
+  if(v.tariff){const t=object(v.tariff);keys(t,['scheme','category']);cfg.tariff={scheme:oneOf(t.scheme??cfg.tariff.scheme,'scheme',['ecg','flat']),category:oneOf(t.category??cfg.tariff.category,'category',['residential','non_residential'])}}
   if(v.assistant){const a=object(v.assistant);keys(a,['provider']);cfg.assistant={provider:oneOf(a.provider,'provider',providers)}}
   if(v.battery){const b=object(v.battery);keys(b,['capacity_kwh','reserve_pct','efficiency','max_discharge_w']);cfg.battery={capacity_kwh:optionalNumber(b.capacity_kwh,'capacity_kwh',.01,10000),reserve_pct:number(b.reserve_pct,'reserve_pct',0,100),efficiency:number(b.efficiency,'efficiency',.01,1),max_discharge_w:optionalNumber(b.max_discharge_w,'max_discharge_w',1,1e7)}}
   if(v.rates){object(v.rates);keys(v.rates,['grid','generator','battery']);for(const k of ['grid','generator','battery'])cfg.rates[k]=optionalNumber(v.rates[k],k,0,1000)}

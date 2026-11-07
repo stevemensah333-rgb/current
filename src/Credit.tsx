@@ -5,7 +5,9 @@ import {Icon} from './ui'
 
 type Cut={id:string;name:string;action:'limit'|'off';from_hours:number;to_hours:number;saves_kwh_day:number;why:string}
 type Plan={status:'already_fits'|'fits_with_cuts'|'cannot_fit'|'insufficient_data';budget_kwh:number;days:number;daily_budget_kwh:number;baseline_kwh_day:number|null;days_at_current_pace:number|null;gap_kwh_day:number;cuts:Cut[];kept_on:{id:string;name:string;why:string}[];planned_kwh_day:number|null;days_with_plan:number|null;shortfall_kwh_day:number;unnamed_kwh_day:number;low_confidence:boolean;meter_ratio:number;assumptions:string[]}
-type Input={amount:number;unit:'ghs'|'kwh';days:number;tariff:number|null;keep_on:string[];budget_kwh:number}
+type Tariff={scheme:'ecg'|'flat';name:string;category?:'residential'|'non_residential';average_price_ghs_per_kwh?:number|null;price_ghs_per_kwh?:number;service_only_ghs?:number}
+type Input={amount:number;unit:'ghs'|'kwh';days:number;tariff:Tariff;keep_on:string[];budget_kwh:number}
+type TariffChoice='residential'|'non_residential'|'flat'
 type Meter={readings:{id:number;at:string;units_left:number}[];ratio:number|null;message:string|null}
 type Result={input:Input;plan:Plan;usage:{days_of_data:number;apparent:boolean};meter:Meter}
 type Progress={status:'on_track'|'over_today'|'over_limit'|'used_up';days_gone:number;days_left:number;used_kwh:number|null;today_kwh:number|null;today_budget_kwh:number;left_kwh:number|null;per_day_left_kwh:number|null;limits:{id:string;name:string;limit_hours:number;hours_today:number|null;over:boolean}[]}
@@ -40,7 +42,11 @@ const askText=(i:{amount:number;unit:'ghs'|'kwh';days:number},keep:string[])=>`M
 
 function PlanResult({r,keep,toggleKeep}:{r:Result;keep:string[];toggleKeep:(id:string)=>void}){
  const p=r.plan
- if(p.status==='insufficient_data')return <div className="credit-result"><h3>Not enough readings yet</h3><p className="muted">The plan needs at least a day of readings from the home monitor ({r.usage.days_of_data} so far). Leave it running and come back tomorrow.</p></div>
+ // What the credit buys under the tariff is known even before there is enough history for a plan.
+ const buys=r.input.unit==='ghs'&&<p className="quiet-note credit-tariff">{r.input.tariff.scheme==='ecg'
+   ?`GHS ${r.input.amount} buys ${kwh(p.budget_kwh)} over ${p.days} days on the ECG ${r.input.tariff.category==='non_residential'?'non-residential':'residential'} tariff (${kwh(p.daily_budget_kwh,2)} a day): about GHS ${(r.input.tariff.average_price_ghs_per_kwh??0).toFixed(2)} per kWh with the levies and service charge.${r.input.tariff.category!=='non_residential'&&p.daily_budget_kwh<=1.0001?' That keeps you on the lifeline rate (30 kWh a month or less).':''}`
+   :`GHS ${r.input.amount} at GHS ${r.input.tariff.price_ghs_per_kwh} per kWh buys ${kwh(p.budget_kwh)}.`}</p>
+ if(p.status==='insufficient_data')return <div className="credit-result"><h3>Not enough readings yet</h3>{buys}<p className="muted">The plan needs at least a day of readings from the home monitor ({r.usage.days_of_data} so far). Leave it running and come back tomorrow.</p></div>
  const head=p.status==='already_fits'?`Good news: at your pace it already lasts ${days(p.days_at_current_pace)}.`
   :p.status==='fits_with_cuts'?`At your pace it lasts ${days(p.days_at_current_pace)}. With these changes, ${days(p.days_with_plan)}.`
   :`Even with every change below it lasts ${days(p.days_with_plan)}, not ${p.days}.`
@@ -51,6 +57,7 @@ function PlanResult({r,keep,toggleKeep}:{r:Result;keep:string[];toggleKeep:(id:s
    <div><span>You use now</span><b>{kwh(p.baseline_kwh_day,2)}</b><small>a day, average of {r.usage.days_of_data} days</small></div>
    <div className={p.gap_kwh_day>0?'gap':''}><span>To save</span><b>{kwh(p.gap_kwh_day,2)}</b><small>a day</small></div>
   </div>
+  {buys}
   {p.cuts.length>0&&<><p className="eyebrow">WHAT TO CHANGE</p><ul className="cut-list">{p.cuts.map(c=><li key={c.id}>
    <span className={`cut-action ${c.action}`}>{c.action==='off'?'Switch off':'Limit'}</span>
    <div><b>{c.name}</b><small>{c.action==='off'?`Off for the whole period (now ${hours(c.from_hours)} a day)`:`${hours(c.from_hours)} → ${hours(c.to_hours)} a day`} · saves {kwh(c.saves_kwh_day,2)} a day</small></div>
@@ -101,18 +108,20 @@ function Tracking({c,change,end,busy}:{c:Current;change:()=>void;end:()=>void;bu
 
 /** Make prepaid credit last: enter the credit and the days, see which appliances to limit, then follow the plan day by day. */
 export function CreditPlan(){
- const rates=useEnergy(s=>s.telemetry?.settings.rates.grid??null),devices=useEnergy(s=>s.telemetry?.devices)
+ const rates=useEnergy(s=>s.telemetry?.settings.rates.grid??null),saved=useEnergy(s=>s.telemetry?.settings.tariff),devices=useEnergy(s=>s.telemetry?.devices)
  const [current,setCurrent]=useState<Current|null>(null),[editing,setEditing]=useState(false)
- const [amount,setAmount]=useState('100'),[unit,setUnit]=useState<'ghs'|'kwh'>('ghs'),[span,setSpan]=useState('14'),[tariff,setTariff]=useState('')
+ const [amount,setAmount]=useState('100'),[unit,setUnit]=useState<'ghs'|'kwh'>('ghs'),[span,setSpan]=useState('14'),[tariff,setTariff]=useState(''),[choice,setChoice]=useState<TariffChoice>('residential')
  const [keep,setKeep]=useState<string[]>([]),[result,setResult]=useState<Result|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false)
  const {job,error:aiError,ask}=useExplain()
  const load=async()=>{try{setCurrent(await api<Current>('/rationing'))}catch(e){setError((e as Error).message)}}
  useEffect(()=>{void load();const t=setInterval(()=>void load(),30000);return()=>clearInterval(t)},[])
  useEffect(()=>{if(rates!=null&&tariff==='')setTariff(String(rates))},[rates])
- const body=()=>({amount:Number(amount),unit,days:Number(span),keep_on:keep,...(unit==='ghs'&&tariff!==''?{tariff_ghs_per_kwh:Number(tariff)}:{})})
- const valid=Number(amount)>0&&Number(span)>=1&&Number(span)<=90&&(unit==='kwh'||Number(tariff)>0)
+ useEffect(()=>{if(saved)setChoice(saved.scheme==='flat'?'flat':saved.category)},[saved?.scheme,saved?.category])
+ // Cedis become kWh under the ECG tariff (residential or non-residential), or at a flat price the user enters.
+ const body=()=>({amount:Number(amount),unit,days:Number(span),keep_on:keep,...(unit==='ghs'?choice==='flat'?{tariff_ghs_per_kwh:Number(tariff)}:{tariff_category:choice}:{})})
+ const valid=Number(amount)>0&&Number(span)>=1&&Number(span)<=90&&(unit==='kwh'||choice!=='flat'||Number(tariff)>0)
  // The preview follows every change, half a second after typing stops.
- useEffect(()=>{if(!valid){setResult(null);return}const t=setTimeout(async()=>{try{setResult(await api<Result>('/rationing/preview','POST',body()));setError('')}catch(e){setError((e as Error).message);setResult(null)}},500);return()=>clearTimeout(t)},[amount,unit,span,tariff,keep.join(',')])
+ useEffect(()=>{if(!valid){setResult(null);return}const t=setTimeout(async()=>{try{setResult(await api<Result>('/rationing/preview','POST',body()));setError('')}catch(e){setError((e as Error).message);setResult(null)}},500);return()=>clearTimeout(t)},[amount,unit,span,tariff,choice,keep.join(',')])
  const toggleKeep=(id:string)=>setKeep(k=>k.includes(id)?k.filter(x=>x!==id):[...k,id])
  const start=async()=>{setBusy(true);try{setCurrent(await api<Current>('/rationing','PUT',body()));setEditing(false)}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
  const end=async()=>{setBusy(true);try{setCurrent(await api<Current>('/rationing','DELETE'))}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
@@ -122,12 +131,13 @@ export function CreditPlan(){
  return <div className="credit-screen panel">
   <div className="credit-intro"><p className="eyebrow">MAKE YOUR CREDIT LAST</p><h2>{current?.plan&&!editing?'Your credit plan':'How long should your credit last?'}</h2>
    {!(current?.plan&&!editing)&&<p className="muted">Enter your prepaid credit and the number of days. The app works out how much you can use each day and which appliances to limit, from what your home really uses.</p>}</div>
-  {current?.plan&&!editing?<Tracking c={current} busy={busy} change={()=>{const i=current.plan!.input;setAmount(String(i.amount));setUnit(i.unit);setSpan(String(i.days));setKeep(i.keep_on);if(i.tariff)setTariff(String(i.tariff));setEditing(true)}} end={()=>void end()}/>:<>
+  {current?.plan&&!editing?<Tracking c={current} busy={busy} change={()=>{const i=current.plan!.input;setAmount(String(i.amount));setUnit(i.unit);setSpan(String(i.days));setKeep(i.keep_on);if(i.tariff.scheme==='flat'){setChoice('flat');setTariff(String(i.tariff.price_ghs_per_kwh))}else if(i.tariff.category)setChoice(i.tariff.category);setEditing(true)}} end={()=>void end()}/>:<>
    <form className="credit-form" onSubmit={e=>{e.preventDefault();void start()}}>
     <fieldset className="unit-toggle"><legend>My credit is in</legend>{(['ghs','kwh'] as const).map(u=><label key={u} className={unit===u?'active':''}><input type="radio" name="unit" checked={unit===u} onChange={()=>setUnit(u)}/>{u==='ghs'?'Cedis (GHS)':'Units (kWh)'}</label>)}</fieldset>
     <label>{unit==='ghs'?'Credit (GHS)':'Units on the meter (kWh)'}<input type="number" min="0.01" step="any" value={amount} onChange={e=>setAmount(e.target.value)} required/></label>
     <label>Make it last (days)<input type="number" min="1" max="90" step="1" value={span} onChange={e=>setSpan(e.target.value)} required/></label>
-    {unit==='ghs'&&<label>Price per kWh (GHS)<input type="number" min="0.01" step="any" value={tariff} onChange={e=>setTariff(e.target.value)} placeholder="See your ECG receipt" required/></label>}
+    {unit==='ghs'&&<label>Tariff<select value={choice} onChange={e=>setChoice(e.target.value as TariffChoice)}><option value="residential">ECG residential</option><option value="non_residential">ECG non-residential</option><option value="flat">My own price</option></select></label>}
+    {unit==='ghs'&&choice==='flat'&&<label>Price per kWh (GHS)<input type="number" min="0.01" step="any" value={tariff} onChange={e=>setTariff(e.target.value)} placeholder="For example, 2.10" required/></label>}
    </form>
    {error&&<p className="attention" role="alert">{error}</p>}
    {result&&<PlanResult r={result} keep={keep} toggleKeep={toggleKeep}/>}

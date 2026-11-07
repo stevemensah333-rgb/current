@@ -6,6 +6,7 @@ import {join} from 'node:path'
 import {openDatabase} from '../server/database.mjs'
 import {createService} from '../server/service.mjs'
 import {createRationing,planText} from '../server/rationing.mjs'
+import {ecgKwhForCredit} from '../shared/calculations.ts'
 import {createAssistant} from '../server/assistant.mjs'
 
 const START=Date.parse('2026-11-03T00:00:00Z'),STEP=60000,DAY=86400000   // one reading a minute keeps the test fast
@@ -35,8 +36,12 @@ test('daily usage per device, and what is not yet named',()=>{const h=home();try
  assert.ok(Math.abs(u.unnamed_kwh_day-4.8)<0.05);assert.equal(u.apparent,true)
 }finally{h.close()}})
 
-test('preview: credit in GHS needs a price; kWh units do not; unknown devices are refused',()=>{const h=home();try{
- assert.throws(()=>h.rationing.preview({amount:50,unit:'ghs',days:5,keep_on:[]}),/price per kWh/)
+test('preview: cedis become kWh under the ECG tariff (or a flat price); unknown devices are refused',()=>{const h=home();try{
+ const ecg=h.rationing.preview({amount:50,unit:'ghs',days:5,keep_on:[]})
+ assert.equal(ecg.input.budget_kwh,ecgKwhForCredit(50,5));assert.equal(ecg.input.tariff.scheme,'ecg');assert.equal(ecg.input.tariff.category,'residential')
+ assert.ok(ecg.input.tariff.average_price_ghs_per_kwh>1.9&&ecg.input.tariff.average_price_ghs_per_kwh<2.6)   // energy plus levies and service
+ assert.ok(h.rationing.preview({amount:50,unit:'ghs',days:5,tariff_category:'non_residential',keep_on:[]}).input.budget_kwh<ecg.input.budget_kwh)
+ assert.match(planText(ecg),/ECG tariff, effective 1 April 2026, residential/)
  const p=h.rationing.preview({amount:50,unit:'ghs',days:5,tariff_ghs_per_kwh:2,keep_on:[]})   // 25 kWh -> 5 a day
  assert.equal(p.plan.budget_kwh,25);assert.equal(p.plan.daily_budget_kwh,5)
  assert.equal(p.plan.status,'fits_with_cuts')                                                  // only the kettle can go: 6.8 - 2 = 4.8 <= 5
@@ -86,5 +91,5 @@ test('the assistant plans with the plan_rationing tool and explains only its num
  assert.ok(seen.names.includes('plan_rationing'));assert.match(seen.system,/plan_rationing/)
  const bad=await createAssistant(h.service,{clock:h.now,rationing:h.rationing,providers:{local:async({execute})=>execute('plan_rationing',{amount:5,unit:'ghs',days:3,keep_on:[]}),cloud:null}})
  const j2=bad.start({message:'x'});await new Promise(r=>setTimeout(r,20))
- assert.match(bad.view(j2.job_id).reply,/price per kWh/)                                         // errors come back as text
+ assert.match(bad.view(j2.job_id).reply,/under the ECG tariff/)                                  // cedis are priced with the ECG tariff
 }finally{h.close()}})

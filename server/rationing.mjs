@@ -3,7 +3,7 @@
 // Example: GHS 100 at GHS 1.80/kWh for 14 days -> 3.97 kWh a day; the home uses 6.0 -> limit the AC to 2.5 h a day...
 import {config} from './database.mjs'
 import {fail,object,keys,number,optionalNumber,oneOf,id} from './validation.mjs'
-import {rationPlan,meterRatio,isApparent} from '../shared/calculations.ts'
+import {rationPlan,meterRatio,isApparent,ecgKwhForCredit,ecgCostForPeriod,ECG_TARIFF} from '../shared/calculations.ts'
 
 const DAY_MS=86400000
 const HISTORY_DAYS=7            // usage is averaged over the last 7 days
@@ -61,14 +61,19 @@ export function createRationing(db,service,{clock=()=>Date.now()}={}){
 
  // --- plan ---
  function input(raw){
-  const v=object(raw);keys(v,['amount','unit','days','tariff_ghs_per_kwh','keep_on'])
+  const v=object(raw);keys(v,['amount','unit','days','tariff_ghs_per_kwh','tariff_category','keep_on'])
   const unit=oneOf(v.unit??'ghs','unit',['ghs','kwh']),amount=number(v.amount,'amount',0.01,1e6),days=number(v.days,'days',1,90)
-  const tariff=optionalNumber(v.tariff_ghs_per_kwh,'tariff_ghs_per_kwh',0.01,1000)??config(db).rates.grid
-  if(unit==='ghs'&&!(tariff>0))fail('Enter your price per kWh (GHS), or enter the amount as kWh units.')
+  // Cedis -> kWh: the ECG tariff by default (blocks, levies, service charge, lifeline refund), or a flat price.
+  const cfg=config(db),flat=optionalNumber(v.tariff_ghs_per_kwh,'tariff_ghs_per_kwh',0.01,1000)??(cfg.tariff.scheme==='flat'?cfg.rates.grid:null)
+  const category=oneOf(v.tariff_category??cfg.tariff.category,'tariff_category',['residential','non_residential'])
+  const tariff=flat!=null?{scheme:'flat',name:`GHS ${flat}/kWh`,price_ghs_per_kwh:flat}:{scheme:'ecg',name:ECG_TARIFF.name,category}
+  if(unit==='ghs'&&tariff.scheme==='flat'&&!(flat>0))fail('Enter your price per kWh (GHS), or enter the amount as kWh units.')
+  const budget=unit==='kwh'?amount:tariff.scheme==='flat'?amount/flat:ecgKwhForCredit(amount,days,category)
+  if(unit==='ghs'&&tariff.scheme==='ecg'){tariff.average_price_ghs_per_kwh=budget>0?amount/budget:null;tariff.service_only_ghs=Math.round(ecgCostForPeriod(0,days,category)*100)/100}
   if(v.keep_on!=null&&(!Array.isArray(v.keep_on)||v.keep_on.length>64))fail('keep_on must be a list of device ids')
   const appliances=service.snapshot().devices.filter(d=>d.role==='appliance').map(d=>d.id)
   const keepOn=(v.keep_on??[]).map(x=>{const i=id(x,'keep_on');if(!appliances.includes(i))fail(`Unknown appliance: ${i}`);return i})
-  return {amount,unit,days,tariff:unit==='ghs'?tariff:tariff??null,keep_on:keepOn,budget_kwh:unit==='ghs'?amount/tariff:amount}
+  return {amount,unit,days,tariff,keep_on:keepOn,budget_kwh:budget}
  }
  function compute(i){
   const usage=dailyUsage(),m=meter()
@@ -113,7 +118,8 @@ export function createRationing(db,service,{clock=()=>Date.now()}={}){
 /** The plan in plain sentences for the assistant to explain. Numbers only from the calculation. */
 export function planText({input,plan,usage}){
  const f=v=>v==null?'unknown':String(v)
- const head=`Budget ${f(plan.budget_kwh)} kWh${input.unit==='ghs'?` (GHS ${input.amount} at GHS ${input.tariff}/kWh)`:''} for ${input.days} days = ${f(plan.daily_budget_kwh)} kWh a day.`
+ const price=input.tariff?.scheme==='ecg'?`under the ${input.tariff.name}, ${input.tariff.category==='non_residential'?'non-residential':'residential'}, about GHS ${input.tariff.average_price_ghs_per_kwh?.toFixed(2)} per kWh with all charges`:`at ${input.tariff?.name}`
+ const head=`Budget ${f(plan.budget_kwh)} kWh${input.unit==='ghs'?` (GHS ${input.amount} ${price})`:''} for ${input.days} days = ${f(plan.daily_budget_kwh)} kWh a day.`
  if(plan.status==='insufficient_data')return `${head} Not enough recorded use yet (${f(usage.days_of_data)} days); no plan can be made.`
  const lines=[head,`The home uses about ${f(plan.baseline_kwh_day)} kWh a day; at this pace the credit lasts ${f(plan.days_at_current_pace)} days.`]
  if(plan.status==='already_fits')lines.push('No changes are needed.')
