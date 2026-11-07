@@ -336,3 +336,18 @@ def test_a_bad_room_fails_the_registration(library):
     g, pipe, posted, _ = register(Library(), [(5, OFF)], {"now": {**REG, "room": "x" * 30}})
     status = [p for path, p in posted if path.endswith("/status")]
     assert status[0]["status"] == "failed" and pipe.teach is None
+
+
+def test_registration_sends_live_current_and_switch_times(library):
+    lib = Library(list(library.devices))
+    g, pipe, posted, _ = register(lib, [(30, OFF)] + [(120, HEATER), (60, OFF)] * 2, {"now": REG})
+    live = [p for path, p in posted if path.endswith("/live")]
+    assert len(live) == 7                                          # once a second over the 7.8 s stream
+    assert all(len(p["amps"]) <= 51 and p["cycle_ms"] == 20 for p in live)
+    assert any(p["measuring"] for p in live) and {p["expecting"] for p in live} == {"on", "off"}
+    assert max(max(p["amps"]) for p in live) > 3.5                 # the heater's 4 A shows up
+    turns = [p for path, p in posted if path.endswith("/turns")]
+    on, kept = turns[0], turns[1]
+    assert on["status"] == "waiting" and on["direction"] == 1 and on["at"].endswith("Z")
+    assert on["before_a"] < 0.1 and abs(on["after_a"] - 4.0) < 0.1
+    assert kept["status"] == "kept" and kept["direction"] == -1 and kept["settle_ms"] is not None

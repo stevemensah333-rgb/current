@@ -96,3 +96,26 @@ test('registration input is checked',async()=>{
   assert.equal((await call(`/gateway/registrations/${id}/turns`,'POST',otherGw,turn())).status,403)
  }finally{await close()}
 })
+
+test('registration live view: listening, the next switch, and the last 2 minutes of current',async()=>{
+ const {call,close}=await server();try{
+  const gw=await withMonitor(call)
+  const id=(await call('/registrations','POST','owner-secret',{name:'Iron'})).data.id
+  assert.equal((await call(`/registrations/${id}/live`,'GET','owner-secret')).data.listening,false)   // the monitor has not started
+  const at=new Date().toISOString()
+  const sent=await call(`/gateway/registrations/${id}/live`,'POST',gw,{schema_version:1,at,cycle_ms:20,amps:Array(50).fill(4),measuring:true,expecting:'on',kept:0})
+  assert.equal(sent.status,200)
+  const view=(await call(`/registrations/${id}/live`,'GET','owner-secret')).data
+  assert.equal(view.listening,true);assert.equal(view.now.measuring,true);assert.equal(view.now.expecting,'on');assert.equal(view.now.amps,4)
+  assert.equal(view.points.length,5)                                                 // 50 cycles -> one point per 200 ms
+  assert.equal((await call(`/registrations/${id}`,'GET','owner-secret')).data.status,'running')     // live readings mean it is listening
+  // a turn now carries when it happened and the current around it
+  const t=await call(`/gateway/registrations/${id}/turns`,'POST',gw,turn({status:'waiting',at,direction:1,before_a:0.02,after_a:4.0,settle_ms:240,surge_peak:1.6,off_step_va:null,waveform:null}))
+  assert.equal(t.status,200)
+  const first=(await call(`/registrations/${id}`,'GET','owner-secret')).data.turns[0]
+  assert.deepEqual([first.direction,first.before_a,first.after_a,first.settle_ms],[1,0.02,4,240])
+  assert.equal((await call(`/gateway/registrations/${id}/live`,'POST',gw,{schema_version:1,at,cycle_ms:20,amps:[-1],measuring:false,expecting:'on'})).status,400)
+  assert.equal((await call(`/gateway/registrations/${id}/live`,'POST',gw,{schema_version:1,at,cycle_ms:20,amps:[],measuring:false,expecting:'sideways'})).status,400)
+  assert.equal((await call(`/gateway/registrations/${id}/live`,'POST','owner-secret',{schema_version:1,at,cycle_ms:20,amps:[],measuring:false,expecting:'on'})).status,401)
+ }finally{await close()}
+})

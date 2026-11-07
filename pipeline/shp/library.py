@@ -95,6 +95,16 @@ class Turn:
     on: Signature | None = None
     off: Signature | None = None
     waveform: dict | None = None
+    t_ms: int | None = None          # board time of the switch that made this result
+    direction: int = 0               # +1 switch-on, -1 switch-off
+    before_a: float | None = None    # current just before the switch, A
+    after_a: float | None = None     # settled current after it, A
+
+
+def _level(cycles) -> float | None:
+    """Average RMS current of some cycles, in amps."""
+    cycles = list(cycles)
+    return sum(c.current_a for c in cycles) / len(cycles) if cycles else None
 
 
 def _cycles(cycles) -> list[list[float]]:
@@ -165,6 +175,14 @@ class TeachSession:
         return not self.ready and self.redos >= self.settings.max_redos
 
     def add(self, sig: Signature, event=None) -> Turn:
+        """One switch in, one result out. Every result says when the switch happened and the current around it."""
+        turn = self._add(sig, event)
+        turn.t_ms, turn.direction = sig.t_ms, sig.direction
+        if event is not None:
+            turn.before_a, turn.after_a = _level(event.before), _level(event.after[-10:])
+        return turn
+
+    def _add(self, sig: Signature, event) -> Turn:
         n = len(self.turns) + 1
         if self.ready:
             return Turn("ignored", f"all {self.target} turns are done")

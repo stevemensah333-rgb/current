@@ -25,6 +25,7 @@ from shp.library import Library, base_name
 from shp.settings import MAINS_V
 
 POST_EVERY_MS = 5000
+LIVE_EVERY_MS = 1000        # registration: live current for the app's chart
 MAX_PAUSE_MS = 25000
 QUEUE_MS = 10 * 60 * 1000
 RETRY_MS = 3000             # after a failure, wait 3 s before trying the backend again
@@ -166,6 +167,8 @@ class Gateway:
         self.registration: str | None = None   # id of the registration running now
         self.reg_ended: set[str] = set()      # finished here; the app's answer can lag by one poll
         self.reg_messages = 0
+        self.live: list[float] = []            # per-cycle current while registering, sent once a second
+        self.next_live: int | None = None
         self.boot = ("replay-" if replay else "") + uuid.uuid4().hex[:12]
         self.channels = sorted({channel_id(d.label) for d in pipeline.library.devices})
         self.seq: dict[str, int] = {}
@@ -267,11 +270,16 @@ class Gateway:
         session = getattr(self.pipe, "teach", None)
         if session is None or self.registration is None:
             return
+        r3 = lambda v: None if v is None else round(v, 3)   # noqa: E731
         for t in turns:
             self._reg_post("turns", {
                 "status": t.status, "number": t.number, "message": t.message,
+                "at": None if t.t_ms is None else iso(self.pipe.house.to_wall(t.t_ms)),
+                "direction": t.direction, "before_a": r3(t.before_a), "after_a": r3(t.after_a),
                 "on_step_va": None if t.on is None else round(t.on.step_va, 1),
                 "off_step_va": None if t.off is None else round(t.off.step_va, 1),
+                "settle_ms": None if t.on is None else t.on.settle_ms,
+                "surge_peak": None if t.on is None or not t.on.surge else round(max(t.on.surge), 3),
                 "shape": None if t.on is None or not t.on.steady else [round(v, 4) for v in t.on.steady],
                 "waveform": t.waveform})
         if session.ready:
@@ -286,6 +294,24 @@ class Gateway:
             self._reg_stop("done", f"saved with {len(session.turns)} turns", device_id=ch)
         elif session.varies:
             self._reg_stop("failed", "this device varied a lot between turns; nothing was saved")
+
+    def _send_live(self, c, wall_ms: int) -> None:
+        """While registering: the current of every cycle, once a second, plus what the monitor is doing now.
+        measuring = a switch was seen and is being measured; expecting = the switch the user should make next."""
+        session = getattr(self.pipe, "teach", None)
+        if session is None or self.registration is None:
+            self.live, self.next_live = [], None
+            return
+        self.live.append(round(c.current_a, 3))
+        if self.next_live is None:
+            self.next_live = wall_ms + LIVE_EVERY_MS
+        if wall_ms < self.next_live:
+            return
+        self.outbox.put(f"/api/v1/gateway/registrations/{self.registration}/live", {
+            "schema_version": 1, "at": iso(self.clock.stamp(wall_ms, "live")), "cycle_ms": 20, "amps": self.live,
+            "measuring": bool(self.pipe.capturing), "expecting": "off" if session.pending else "on",
+            "kept": len(session.turns)})
+        self.live, self.next_live = [], wall_ms + LIVE_EVERY_MS
 
     def _heartbeat(self, wall_ms: int) -> None:
         for ch, (va, p) in self.channel_state().items():
@@ -321,6 +347,7 @@ class Gateway:
         if events or flags or health:
             self.save()
         self._follow_registration()
+        self._send_live(c, wall)
 
         if self.pipe.capturing:
             self.pause_since = self.pause_since if self.pause_since is not None else wall

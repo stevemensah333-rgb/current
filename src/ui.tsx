@@ -8,7 +8,7 @@ export function Icon({name,size=20}:{name:string;size?:number}) {
 }
 export function deviceIcon(d:Device){return d.kind==='lights'?'sun':d.kind==='laptop'||d.kind==='tv'?'grid':'plug'}
 export function hoursLabel(hours:number){if(!Number.isFinite(hours))return 'No active load';if(hours<=0)return 'Reserve reached';const minutes=Math.round(hours*60);return `${Math.floor(minutes/60)}h ${minutes%60}m`}
-export function Modal({title,close,children,side=false,eyebrow}:{title:string;close:()=>void;children:ReactNode;side?:boolean;eyebrow?:string}){
+export function Modal({title,close,children,side=false,eyebrow,className=''}:{title:string;close:()=>void;children:ReactNode;side?:boolean;eyebrow?:string;className?:string}){
  const ref=useRef<HTMLElement>(null)
  useEffect(()=>{
   const previous=document.activeElement as HTMLElement|null
@@ -17,7 +17,7 @@ export function Modal({title,close,children,side=false,eyebrow}:{title:string;cl
   const onKey=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();close()}if(e.key==='Tab'){const nodes=elements();const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}}}
   document.addEventListener('keydown',onKey);return()=>{document.removeEventListener('keydown',onKey);previous?.focus()}
  },[])
- return createPortal(<div className={`modal-backdrop ${side?'side':''}`} onClick={close}><section ref={ref} className="modal panel" role="dialog" aria-modal="true" aria-label={title} onClick={e=>e.stopPropagation()}><div className="modal-top"><span className="eyebrow">{eyebrow??(side?'YOUR APPLIANCE':'CURRENT')}</span><button className="icon-button" onClick={close} aria-label={`Close ${title}`}><Icon name="close"/></button></div><h2>{title}</h2>{children}</section></div>,document.body)
+ return createPortal(<div className={`modal-backdrop ${side?'side':''}`} onClick={close}><section ref={ref} className={`modal panel ${className}`} role="dialog" aria-modal="true" aria-label={title} onClick={e=>e.stopPropagation()}><div className="modal-top"><span className="eyebrow">{eyebrow??(side?'YOUR APPLIANCE':'CURRENT')}</span><button className="icon-button" onClick={close} aria-label={`Close ${title}`}><Icon name="close"/></button></div><h2>{title}</h2>{children}</section></div>,document.body)
 }
 
 const clamp=(v:number,lo:number,hi:number)=>Math.min(Math.max(v,lo),Math.max(lo,hi))

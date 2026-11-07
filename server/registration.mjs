@@ -35,17 +35,26 @@ function waveformInput(raw){
  const part=(p,name)=>{const w=object(p);keys(w,['t_ms','before','after']);return {t_ms:number(w.t_ms,`${name}.t_ms`,0,Number.MAX_SAFE_INTEGER),before:cycles(w.before,`${name}.before`,per),after:cycles(w.after,`${name}.after`,per)}}
  return {readings_per_cycle:per,on:part(v.on,'on'),off:part(v.off,'off')}
 }
+const isoTime=(v,name)=>{const t=text(v,name,40);if(!Number.isFinite(Date.parse(t))||!/(Z|[+-]\d\d:\d\d)$/.test(t))fail(`${name} must be an ISO 8601 time with timezone`);return new Date(Date.parse(t)).toISOString()}
 function turnInput(raw){
- const v=object(raw);keys(v,['schema_version','message_id','status','number','message','on_step_va','off_step_va','shape','waveform'])
+ const v=object(raw);keys(v,['schema_version','message_id','status','number','message','at','direction','before_a','after_a','on_step_va','off_step_va','settle_ms','surge_peak','shape','waveform'])
  if(v.schema_version!==1)fail('Unsupported schema_version; expected 1')
  if(v.shape!=null&&(!Array.isArray(v.shape)||v.shape.length>256))fail('shape must be a list of at most 256 numbers')
  return {message_id:id(v.message_id,'message_id'),status:oneOf(v.status,'status',TURN_STATUS),number:v.number==null?null:number(v.number,'number',1,TURNS),
-  message:text(v.message,'message',300),on_step_va:optionalNumber(v.on_step_va,'on_step_va',-1e7,1e7),off_step_va:optionalNumber(v.off_step_va,'off_step_va',-1e7,1e7),
+  message:text(v.message,'message',300),at:v.at==null?null:isoTime(v.at,'at'),direction:v.direction==null?0:oneOf(v.direction,'direction',[-1,0,1]),
+  before_a:optionalNumber(v.before_a,'before_a',0,1e4),after_a:optionalNumber(v.after_a,'after_a',0,1e4),settle_ms:optionalNumber(v.settle_ms,'settle_ms',0,1e6),surge_peak:optionalNumber(v.surge_peak,'surge_peak',-1e4,1e4),
+  on_step_va:optionalNumber(v.on_step_va,'on_step_va',-1e7,1e7),off_step_va:optionalNumber(v.off_step_va,'off_step_va',-1e7,1e7),
   shape:v.shape==null?null:v.shape.map(x=>finite(x,'shape')),waveform:waveformInput(v.waveform)}
 }
 
+const LIVE_MS=120000            // the app's chart shows the last 2 minutes
+const LIVE_POINT_MS=200        // one chart point per 200 ms (10 mains cycles)
+const LIVE_STALE_MS=4000       // no live readings for 4 s: the monitor is not listening
+
 export function createRegistrations(db,{clock=()=>Date.now(),registerDevice}){
  migrate(db)
+ // Live current while registering. Kept in memory only: it is for the chart, not a record.
+ const live=new Map()   // registration id -> {points:[[ms,amps]], at, amps, measuring, expecting, kept}
  const now=()=>new Date(clock()).toISOString()
  const row=regId=>{const r=db.prepare('SELECT * FROM registrations WHERE id=?').get(regId);if(!r)fail('Registration not found',404);return r}
  function view(r){
@@ -91,6 +100,29 @@ export function createRegistrations(db,{clock=()=>Date.now(),registerDevice}){
   return {registration_id:regId,turn_id:turnId,...JSON.parse(t.summary),waveform:JSON.parse(t.waveform)}
  }
  // --- the gateway's side ---
+ function addLive(regId,raw,gateway){
+  const r=ownActive(regId,gateway),v=object(raw);keys(v,['schema_version','at','cycle_ms','amps','measuring','expecting','kept'])
+  if(v.schema_version!==1)fail('Unsupported schema_version; expected 1')
+  const at=Date.parse(isoTime(v.at,'at')),cycle=number(v.cycle_ms,'cycle_ms',1,1000)
+  if(!Array.isArray(v.amps)||v.amps.length>500)fail('amps must be a list of at most 500 numbers')
+  const amps=v.amps.map(x=>number(x,'amps',0,1e4))
+  const state=live.get(r.id)||{points:[]}
+  // Average every 10 cycles into one point; the newest reading is the end of the list.
+  const per=Math.max(1,Math.round(LIVE_POINT_MS/cycle))
+  for(let i=0;i<amps.length;i+=per){const part=amps.slice(i,i+per);state.points.push([at-(amps.length-i-part.length)*cycle,part.reduce((a,b)=>a+b,0)/part.length])}
+  state.points=state.points.filter(p=>p[0]>at-LIVE_MS)
+  Object.assign(state,{at,amps:amps.length?amps.slice(-10).reduce((a,b)=>a+b,0)/Math.min(10,amps.length):state.amps??null,measuring:Boolean(v.measuring),expecting:oneOf(v.expecting,'expecting',['on','off']),kept:number(v.kept??0,'kept',0,TURNS)})
+  live.set(r.id,state)
+  if(r.status==='waiting')db.prepare('UPDATE registrations SET status=?,message=?,updated_at=? WHERE id=?').run('running','Listening.',now(),r.id)
+  return {ok:true}
+ }
+ /** The chart and the "do this now" state. listening=false when the monitor has gone quiet. */
+ function liveView(regId){
+  const r=row(regId),state=live.get(r.id)
+  if(!state)return {listening:false,points:[],now:null}
+  const fresh=clock()-state.at<LIVE_STALE_MS&&ACTIVE.includes(r.status)
+  return {listening:fresh,points:state.points,now:{at:new Date(state.at).toISOString(),amps:state.amps,measuring:state.measuring,expecting:state.expecting,kept:state.kept}}
+ }
  function forGateway(gateway){
   const r=db.prepare(`SELECT * FROM registrations WHERE gateway_id=? AND status IN ('waiting','running')`).get(gateway.id)
   if(!r)return {registration:null}
@@ -142,5 +174,5 @@ export function createRegistrations(db,{clock=()=>Date.now(),registerDevice}){
   }
   registerDevice({id:p.device_id,name:p.name,room:p.room,kind:p.kind,role:'appliance',measurement_kind:'inferred',parent_device_id:p.parent_device_id,gateway_id:p.gateway_id,expected_interval_s:10})
  }
- return {start,get,current,cancel,waveform,forGateway,addTurn,setStatus}
+ return {start,get,current,cancel,waveform,forGateway,addTurn,setStatus,addLive,live:liveView}
 }
