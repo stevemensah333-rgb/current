@@ -159,7 +159,9 @@ def classify(sig: Signature, cands: list[Candidate], model: Model) -> Prediction
         c = usable[0]
         d, limit = closest(c), _limit(c)
         if d > limit:
-            return unknown(True)
+            # Switch-offs: a charger fading out after unplugging has an unreliable shape, but only something on the
+            # list can switch off, so a power match names it.
+            return by_power([c], step) if sig.direction < 0 else unknown(True)
         p = max(0.0, min(1.0, 1 - d / limit))
         return Prediction(c.label, p, ((c.label, p),), True, "match", True, nearest, nearest_d)
 
@@ -181,5 +183,5 @@ def classify(sig: Signature, cands: list[Candidate], model: Model) -> Prediction
         _columns_checked = True
     winner = next(c for c in usable if c.label == ranked[0][0])
     if closest(winner) > _limit(winner):
-        return unknown(True, "timee")
+        return by_power(matched, step) if sig.direction < 0 else unknown(True, "timee")
     return Prediction(ranked[0][0], ranked[0][1], ranked, True, "timee", True, nearest, nearest_d)

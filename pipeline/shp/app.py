@@ -8,6 +8,7 @@
 Every command takes --in <file> instead of --port, so a saved session replays through the same code.
 """
 import argparse
+import dataclasses
 import datetime
 import os
 import statistics
@@ -68,11 +69,26 @@ class Pipeline:
         # so the device being registered is never named, logged or alerted on. Mains keeps measuring.
         self.teach: TeachSession | None = None
         self.teach_turns: list = []     # Turn results since the caller last cleared it
+        self._levels: list[float] = []  # current of recent cycles, for the once-a-second on-list check
 
     @property
     def capturing(self) -> bool:
         """True while a step is being captured: its result is not known yet."""
         return self.detector.after is not None or self.detector.held_before is not None
+
+    def _check_on_list(self, c) -> None:
+        """Once a second, while nothing is switching: take off anything the home total shows cannot be on."""
+        self._levels.append(c.current_a)
+        if len(self._levels) < self.s.reconcile_every_cycles:
+            return
+        level, self._levels = statistics.fmean(self._levels), []
+        if self.capturing or not self.house.on_list:
+            return
+        listed = sum(e.step_va for e in self.house.on_list)
+        slack = max(self.s.min_event_va, self.s.power_tolerance_frac * listed)
+        for e in self.house.reconcile(MAINS_V * level, slack, c.t_ms):
+            # stamped now, so the gateway posts the corrected state at this moment
+            self.events.append((-1, dataclasses.replace(e.signature, t_ms=c.t_ms, direction=-1), None))
 
     def _update_offset(self, c) -> None:
         if self.offset is None:
@@ -86,6 +102,7 @@ class Pipeline:
         """Returns plain messages about anything that happened on this cycle."""
         out = []
         self._update_offset(c)
+        self._check_on_list(c)
         _, flag = self.power.feed(c)
         if flag:
             out.append(f"power: {flag.kind}, {flag.delta_va:+.0f} VA")

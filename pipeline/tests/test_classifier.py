@@ -68,7 +68,9 @@ def test_switch_off_only_considers_devices_that_are_on():
     house = House()
     house.switched_on(sig(2000, KETTLE), classify(sig(2000, KETTLE), on_candidates(lib, S), NearestModel()))
     p = classify(sig(2000, CHARGER, direction=-1), off_candidates(house.on_list, lib, S), NearestModel())
-    assert p.label == UNKNOWN and not p.matched      # the heater is not on, the shape is not the kettle's
+    # The heater is not on, so it is never considered. The shape is not the kettle's, but a 2000 W drop while only
+    # the kettle is on can only be the kettle: switch-offs fall back to the power match.
+    assert p.label == "kettle" and p.source == "power" and all(label != "heater" for label, _ in p.ranked)
 
 
 def test_unknown_entry_matches_its_own_shape_at_switch_off():
@@ -119,3 +121,15 @@ def test_an_appliance_that_varies_between_turns_is_still_named():
     p = classify(sig(62, live), on_candidates(lib, S), NearestModel())
     assert p.label == "laptop" and p.p > 0
     assert classify(sig(2000, live), on_candidates(lib, S), NearestModel()).label == UNKNOWN   # power still checked
+
+
+def test_a_switch_off_that_matches_by_power_names_the_appliance_even_if_its_shape_fades():
+    """A charger fading out after unplugging gives an odd shape; only listed appliances can switch off."""
+    lib = Library([device("jojo", 52, CHARGER)])
+    house = House()
+    house.switched_on(sig(52, CHARGER), classify(sig(52, CHARGER), on_candidates(lib, S), NearestModel()))
+    off = sig(54, shape(np.cos), direction=-1)            # same power, a different (faded) shape
+    p = classify(off, off_candidates(house.on_list, lib, S), NearestModel())
+    assert p.label == "jojo" and p.source == "power"
+    on = classify(sig(52, shape(np.cos)), on_candidates(lib, S), NearestModel())
+    assert on.label == UNKNOWN                            # a switch-on still needs its shape to match

@@ -54,6 +54,21 @@ class House:
         self.log.append(Change(self.to_wall(sig.t_ms), e.label, False, pred.p, e.step_va))
         return e
 
+    def reconcile(self, total_va: float, slack_va: float, t_ms: int) -> list[OnEntry]:
+        """A measured check, not a guess: the home total cannot be lower than what the on-list says is on.
+        Example: Jojo listed at 52 W while the clamp reads 6 W -> its switch-off was missed; Jojo is taken off.
+        Takes off the entry that best explains the excess, repeating until the list fits within slack_va."""
+        removed = []
+        while self.on_list:
+            excess = sum(e.step_va for e in self.on_list) - total_va
+            if excess <= slack_va:
+                break
+            e = min(self.on_list, key=lambda x: abs(x.step_va - excess))
+            self.on_list.remove(e)
+            self.log.append(Change(self.to_wall(t_ms), e.label, False, 0.0, e.step_va))
+            removed.append(e)
+        return removed
+
     def summary(self) -> str:
         """The SLM state line, e.g. 'kettle ON 0.94, fridge ON 0.88, unknown ON'."""
         if not self.on_list:

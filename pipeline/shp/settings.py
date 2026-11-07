@@ -35,6 +35,7 @@ class Settings:
     # 6 Live monitoring: changes smaller than this are an appliance's own drift (a charger's draw wobbles 5-15 W),
     #   so outside registration they are not named, listed or alerted on
     min_event_va: float = 20.0
+    reconcile_every_cycles: int = 50   # once a second, check the on-list against the measured home total
 
     @property
     def live_threshold_a(self) -> float:

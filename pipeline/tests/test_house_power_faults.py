@@ -148,3 +148,15 @@ def test_health_is_ok_then_watch_then_alert():
     for day in (3, 4):
         fm.log(sig(60, LAMP, settle_ms=400), pred("lamp"), lib, day)
     assert fm.health("lamp", lib)["status"] == "alert" and fm.health("lamp", lib)["days_outside"] == 3
+
+
+def test_the_home_total_takes_off_an_appliance_that_cannot_be_on():
+    """Seen on the board: Jojo listed at 52 W while the clamp read 6 W, because its switch-off was missed."""
+    from shp.classifier import Prediction
+    h = House()
+    for label, va in (("jojo", 52), ("unknown", 29), ("unknown", 36)):
+        h.switched_on(sig(va), Prediction(label, 0.9, (), True, "match"))
+    gone = h.reconcile(total_va=6, slack_va=20, t_ms=1000)
+    assert h.on_list == [] and len(gone) == 3
+    h.switched_on(sig(52), Prediction("jojo", 0.9, (), True, "match"))
+    assert h.reconcile(total_va=58, slack_va=20, t_ms=2000) == [] and len(h.on_list) == 1   # it is on: kept
