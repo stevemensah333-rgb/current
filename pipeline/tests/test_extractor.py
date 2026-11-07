@@ -130,3 +130,21 @@ def test_settle_time_is_measured():
 def test_clock_carried_far_is_low_trust():
     assert not extract(only_event(ramp_on(10)), S).low_trust
     assert extract(only_event(ramp_on(40)), S).low_trust     # after group starts > 25 cycles later
+
+
+def test_a_charger_fading_out_after_unplugging_is_trusted():
+    """A laptop charger's current fades over ~0.5 s after unplugging (seen on the board: 0.238 A -> 0.023 A).
+    With the line back near zero, carrying the clock from before the switch cannot distort anything, so the
+    switch-off must not be marked low trust."""
+    from helpers import cycles_from, wave
+    from shp.detector import Event
+    from shp.extractor import extract
+    from shp.settings import Settings
+    s = Settings(threshold_a=0.03, clock_min_level_mult=2.5)
+    fade = [(1, wave(0.20 - 0.17 * k / 29)) for k in range(30)]          # 0.20 A down to 0.03 A over 30 cycles
+    cycles = cycles_from([(10, wave(0.25))] + fade + [(10, wave(0.023))], seed=5)
+    before, after = tuple(cycles[:10]), tuple(cycles[10:])
+    off = Event(-1, after[0].t_ms, 0.023 - 0.25, before, after, settled=True, clean=True)
+    sig = extract(off, s)
+    assert sig.settle_ms > s.max_carry_cycles * 20   # it really took longer than the carry limit
+    assert not sig.low_trust and sig.shape_ok

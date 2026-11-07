@@ -54,7 +54,7 @@ class Pipeline:
                  now_ms: Callable[[], int] | None = lambda: int(time.time() * 1000)):
         self.s, self.library, self.model = settings, library, model
         self.now_ms = now_ms
-        self.detector = Detector(settings.threshold_a)
+        self.detector = Detector(settings.live_threshold_a)   # registration lowers it to the measured quiet line
         self.power = PowerMonitor(settings)
         self.faults = faults or FaultMonitor(settings)
         self.offset = None
@@ -89,7 +89,7 @@ class Pipeline:
         _, flag = self.power.feed(c)
         if flag:
             out.append(f"power: {flag.kind}, {flag.delta_va:+.0f} VA")
-            if flag.kind == "missed event":
+            if flag.kind == "missed event" and abs(flag.delta_va) >= self.s.min_event_va:
                 self.flags.append({"kind": "missed_event", "t_ms": flag.t_ms, "device": None,
                                    "value": None, "amount": flag.delta_va})
         event = self.detector.feed(c)
@@ -100,6 +100,9 @@ class Pipeline:
             turn = self.teach.add(sig, event)
             self.teach_turns.append(turn)
             out.append(f"REGISTER {self.teach.name}: {turn.message}")
+            self.power.reanchor(MAINS_V * statistics.fmean(x.current_a for x in event.after[-STEADY_CYCLES:]))
+            return out
+        if abs(sig.step_va) < self.s.min_event_va:   # drift, not a switch: nothing to name or alert on
             self.power.reanchor(MAINS_V * statistics.fmean(x.current_a for x in event.after[-STEADY_CYCLES:]))
             return out
         if sig.direction > 0:

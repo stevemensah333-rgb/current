@@ -15,17 +15,27 @@ def from_file(path: str | Path) -> Iterator[str]:
             yield line.rstrip("\r\n")
 
 
-def from_serial(port: str, baud: int = 115200) -> Iterator[str]:
-    """Reopens the port if the USB link drops."""
+SILENT_S = 5   # the board sends ~50 lines a second; 5 s of nothing means the USB link has stalled
+
+
+def from_serial(port: str, baud: int = 115200, opener=serial.Serial, silent_s: float = SILENT_S) -> Iterator[str]:
+    """Reopens the port if the USB link drops, or if the board goes silent: a stalled USB-serial chip can stay
+    'connected' while passing no data, and only a fresh open (or a replug) brings it back."""
     while True:
         try:
-            with serial.Serial(port, baud, timeout=2) as s:
+            with opener(port, baud, timeout=1) as s:
+                last = time.monotonic()
                 while True:
                     raw = s.readline()
                     if raw:
+                        last = time.monotonic()
                         yield raw.decode("ascii", "replace").rstrip("\r\n")
+                    elif time.monotonic() - last > silent_s:
+                        print(f"[serial] no data from {port} for {silent_s:.0f} s; reopening", flush=True)
+                        break
         except serial.SerialException:
-            time.sleep(1)
+            pass
+        time.sleep(1)
 
 
 def record(lines: Iterable[str], path: str | Path) -> Iterator[str]:

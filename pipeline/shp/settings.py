@@ -22,8 +22,8 @@ class Settings:
     max_carry_cycles: int = 25          # clock carried from before over > 25 cycles -> low trust
 
     # 4 Library
-    teach_turns: int = 5    # registration: kept turns (one switch-on + its switch-off each)
-    max_redos: int = 5      # odd turns allowed before "this device varies a lot"
+    teach_turns: int = 3    # registration: kept turns (one switch-on + its switch-off each)
+    max_redos: int = 5      # unusable switch-offs allowed before registration stops
     shape_floor: float = 0.1
     working_min_p: float = 0.9
     working_per_device: int = 20
@@ -31,6 +31,16 @@ class Settings:
     # 5 Classifier
     unknown_limit_floor: float = 0.1
     power_tolerance_frac: float = 0.10
+
+    # 6 Live monitoring: changes smaller than this are an appliance's own drift (a charger's draw wobbles 5-15 W),
+    #   so outside registration they are not named, listed or alerted on
+    min_event_va: float = 20.0
+
+    @property
+    def live_threshold_a(self) -> float:
+        """What live monitoring looks for: real switches of min_event_va or more (20 W -> 0.087 A). The fine
+        threshold_a is only a floor for registration, which measures the quiet line itself."""
+        return max(self.threshold_a, self.min_event_va / MAINS_V)
 
     # 7 Power monitor
     drift_hold_s: int = 5

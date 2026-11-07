@@ -33,61 +33,20 @@ def test_a_turn_is_a_switch_on_then_its_switch_off():
     first = t.add(sig(2000, KETTLE))
     assert first.status == "waiting" and "Now switch it off" in first.message and t.turns == []
     kept = t.add(sig(2000, KETTLE, direction=-1))
-    assert kept.status == "kept" and kept.number == 1 and "turn 1 of 5 kept" in kept.message
+    assert kept.status == "kept" and kept.number == 1 and "turn 1 of 3 kept" in kept.message
     assert len(t.turns) == 1 and t.on[0].direction == 1 and t.off[0].direction == -1
 
 
-def test_exactly_five_turns_then_finished():
-    t = taught(rounds=4)
+def test_exactly_three_turns_then_finished():
+    t = taught(rounds=2)
     assert not t.ready
     with pytest.raises(ValueError):
         t.finish()
-    last = turn(t, 2020)
-    assert t.ready and "all 5 turns done" in last.message
+    last = turn(t, 2010)
+    assert t.ready and "all 3 turns done" in last.message
     assert t.add(sig(2000, KETTLE)).status == "ignored"      # a sixth switch is not used
     entry = t.finish()
-    assert len(entry.on_examples) == 5 and len(entry.off_examples) == 5   # kept separately, not averaged
-
-
-def test_odd_power_is_a_redo_and_kept_turns_stay():
-    t = TeachSession("kettle", S)
-    turn(t, 2000)
-    turn(t, 2010)
-    odd = turn(t, 2500)
-    assert odd.status == "redo" and "far from the other turns" in odd.message and "Do turn 3 again" in odd.message
-    assert [round(abs(s.step_va)) for s in t.on] == [2000, 2010]
-    assert turn(t, 2005).number == 3
-
-
-def test_odd_shape_is_a_redo():
-    t = TeachSession("kettle", S)
-    turn(t, 2000)
-    turn(t, 2000)
-    odd = turn(t, 2000, steady=shape(np.cos))
-    assert odd.status == "redo" and "shape is different" in odd.message and len(t.turns) == 2
-
-
-def test_switch_off_must_match_its_switch_on():
-    t = TeachSession("kettle", S)
-    r = turn(t, 2000, off_step=1500)
-    assert r.status == "redo" and "did not match" in r.message and t.turns == []
-
-
-def test_untrusted_switches_are_refused_and_do_not_count():
-    t = TeachSession("kettle", S)
-    assert "other big loads" in t.add(sig(2000, low_trust=True)).message
-    assert "readings were lost" in t.add(sig(2000, clean=False)).message
-    assert "never settled" in t.add(sig(2000, settled=False)).message
-    assert t.turns == [] and t.redos == 0
-    assert t.add(sig(2000, KETTLE, direction=-1)).status == "ignored"   # an off with no on before it
-    assert turn(t, 2000).number == 1
-
-
-def test_device_that_varies_stops_after_max_redos():
-    t = TeachSession("lamp", S)
-    for _ in range(S.max_redos):
-        r = turn(t, 100, off_step=300)
-    assert t.varies and "varies a lot" in r.message
+    assert len(entry.on_examples) == 3 and len(entry.off_examples) == 3   # kept separately, not averaged
 
 
 def test_each_turn_keeps_its_raw_waveform():
@@ -144,3 +103,42 @@ def test_working_library_takes_only_confident_clean_switch_ons():
     for _ in range(30):
         lib.add_live(sig(2000, KETTLE), P(), S)
     assert len(lib.devices[0].live_examples) == S.working_per_device
+
+
+def test_wobble_during_a_turn_is_ignored_and_the_turn_stays_open():
+    t = TeachSession("laptop", S)
+    t.add(sig(57, KETTLE))                                   # switched on, +57
+    w = t.add(sig(14, KETTLE, direction=-1, low_trust=True))  # charging drifts down 14: not the switch-off
+    assert w.status == "ignored" and "small change" in w.message and t.pending is not None and t.redos == 0
+    assert t.add(sig(10, KETTLE)).status == "ignored"        # drifts up again
+    assert t.add(sig(55, KETTLE, direction=-1)).status == "kept"   # the real switch-off still closes the turn
+
+
+def test_natural_variation_is_kept_for_timee_to_judge():
+    """Measured on the board: a laptop charger's switch-on was 57-65 W across turns and its shape moved by up to
+    0.45. Registration keeps every usable turn as it is; TimEE compares live switches with all of them."""
+    base, near = shape(wave(0.28, third=0.3)), shape(wave(0.28, third=0.3, phase_deg=12))
+    t = TeachSession("laptop", S)
+    assert turn(t, 65, steady=base).status == "kept"
+    assert turn(t, 57, steady=near, off_step=64).status == "kept"     # other power, other shape, on/off differ
+    assert turn(t, 62, steady=shape(np.cos)).status == "kept" and t.ready
+    assert [round(abs(x.step_va)) for x in t.on] == [65, 57, 62]       # stored as measured, not averaged
+
+
+def test_only_unusable_switches_are_refused():
+    t = TeachSession("kettle", S)
+    assert "readings were lost" in t.add(sig(2000, clean=False)).message
+    assert "no shape" in t.add(sig(2000, shape_ok=False)).message
+    assert t.turns == [] and t.redos == 0                               # refused switch-ons do not count
+    assert t.add(sig(2000, KETTLE, direction=-1)).status == "ignored"   # an off with no on before it
+    assert turn(t, 2000).number == 1
+    t.add(sig(2000, KETTLE, low_trust=True, settled=False))             # other loads or a slow settle: still usable
+    assert t.add(sig(2000, KETTLE, direction=-1)).status == "kept"
+
+
+def test_registration_stops_after_max_redos_of_unusable_switch_offs():
+    t = TeachSession("lamp", S)
+    for _ in range(S.max_redos):
+        t.add(sig(100))
+        r = t.add(sig(100, direction=-1, clean=False))
+    assert r.status == "redo" and t.varies and "stopping" in r.message

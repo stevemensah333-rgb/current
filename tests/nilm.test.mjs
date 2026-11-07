@@ -40,7 +40,7 @@ test('snapshot labels VA, computes "not yet named" from fresh parts only, and la
  f.mains(2093,0);f.kettle(2000,.94,0);f.advance(5000);f.mains(2093,0);f.kettle(2000,.94,0)
  let s=f.service.snapshot()
  assert.equal(s.demand_basis,'apparent_estimate_va');assert.equal(Math.round(s.unnamed_va),93)
- assert.match(s.cost_basis,/Overstates the bill/)
+ assert.match(s.cost_basis,/Estimated from current at 230 V/)
  assert.equal(s.devices.find(d=>d.id==='kettle').energy_methods.includes('integrated_apparent_va'),true)
  f.advance(31000);f.mains(1000,0)                       // kettle channel now stale
  s=f.service.snapshot();assert.equal(s.unnamed_va,null)
@@ -87,7 +87,7 @@ test('usage reports hours on, VA-hours and how much of the period is recorded',(
 test('the state line holds ids and numbers only',()=>{const f=fixture();try{
  f.mains(2093,0);f.kettle(2000,.94,0)
  const line=stateLine(f.service.snapshot())
- assert.match(line,/On now: kettle 2000 VA p 0\.94\./);assert.match(line,/House total 2093 VA\./);assert.doesNotMatch(line,/Kettle/)
+ assert.match(line,/On now: kettle 2000 W p 0\.94\./);assert.match(line,/House total 2093 W\./);assert.doesNotMatch(line,/Kettle/)
 }finally{f.close()}})
 
 test('LFM3 XML tool calls are read',()=>{
@@ -118,7 +118,7 @@ test('get_usage answers from stored readings; switch_off asks for a single-use, 
  f.mains(2093,0);f.kettle(2000,.94,0);f.advance(5000);f.mains(2093,0);f.kettle(2000,.94,0)
  const a=createAssistant(f.service,{clock:f.now,providers:{local:scripted({tool:'get_usage',input:{device:'kettle',period:'hour'}},{answer:'ok'}),cloud:null}})
  const j=a.start({message:'how long?'}).job_id;await until(()=>a.view(j).status==='done')
- assert.match(a.view(j).reply,/kettle: 0\.00 h on, 3 VAh \(estimated\) in the last hour \(only 0\.0 h of the last hour recorded\)\./);assert.match(a.view(j).reply,/get_usage,plan_rationing,switch_off/)
+ assert.match(a.view(j).reply,/kettle: 0\.00 h on, 3 Wh \(estimated\) in the last hour \(only 0\.0 h of the last hour recorded\)\./);assert.match(a.view(j).reply,/get_usage,plan_rationing,switch_off/)
  const b=createAssistant(f.service,{clock:f.now,providers:{local:scripted({tool:'switch_off',input:{device:'kettle'}},{answer:'asked'}),cloud:null}})
  const k=b.start({message:'switch the kettle off'}).job_id;await until(()=>b.view(k).status==='done')
  const {token,device}=b.view(k).confirm;assert.equal(device,'kettle')
@@ -197,9 +197,9 @@ test('the last tool round still gets an answer; malformed tool arguments are rep
  await assert.rejects(garbled({system:'s',user:'u',specs:SPEC,execute:async()=>'',maxRounds:2}),/could not be read/)
 })
 
-test('the system prompt mentions VA only for VA data',()=>{
- assert.match(systemPrompt({demand_basis:'apparent_estimate_va'}),/apparent power in VA/)
- assert.doesNotMatch(systemPrompt({demand_basis:'reported'}),/VA/)
+test('the system prompt says watts are estimated only for clamp data',()=>{
+ assert.match(systemPrompt({demand_basis:'apparent_estimate_va'}),/watts estimated from current at 230 V/)
+ assert.doesNotMatch(systemPrompt({demand_basis:'reported'}),/estimated/)
 })
 
 test('a cancelled question cannot switch anything off; the running job can be found again',async()=>{const f=fixture();try{

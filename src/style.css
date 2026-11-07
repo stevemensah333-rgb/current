@@ -248,3 +248,23 @@
 .meter-readings li{display:flex;justify-content:space-between;font-size:13px;padding:4px 0;color:var(--text-secondary);border-bottom:1px solid var(--border)}
 .meter-readings b{color:var(--text);font-weight:500}
 @media(max-width:760px){.credit-screen{padding:16px}.credit-facts{grid-template-columns:1fr}.cut-list li{grid-template-columns:80px 1fr}.cut-list li .text-link{grid-column:2}}
+.register-off-first{display:flex;gap:10px;align-items:flex-start;margin:16px 0 4px;padding:12px 14px;border-radius:10px;border:1px solid var(--alert-border);background:var(--alert-surface);color:var(--alert-text);font-size:14px;line-height:1.5}
+.register-off-first svg{flex:none;margin-top:3px}
+.do-now.quiet{border-color:var(--alert-border);box-shadow:0 0 0 3px var(--alert-surface)}
+.do-now.quiet .do-now-action{background:var(--alert-surface);border-color:var(--alert-border);color:var(--alert-text)}
+/* Registration speaks calmly: no warning colours or icons, only the single next step. */
+.register-off-first{border-color:var(--border);background:var(--surface);color:var(--text)}
+.do-now.quiet{border-color:var(--primary);box-shadow:0 0 0 3px var(--selection)}
+.do-now.quiet .do-now-action{background:var(--page);border-color:var(--border);color:var(--text)}
+.do-now.measure-on .do-now-action,.do-now.measure-off .do-now-action{border-style:solid}
+.do-now.failed{border-color:var(--border);background:var(--surface)}
+.do-now.failed .do-now-action{color:var(--text-secondary);min-width:72px}
+.turn-result.redo,.turn-result.refused,.turn-result.ignored{background:var(--surface);color:var(--text-secondary)}
+.turn-badge.redo{background:var(--surface);color:var(--text-secondary);border:1px solid var(--border)}
+.turn-table tr.redo-reason td{color:var(--text-secondary)}
+.live-chart .mark.redo line{stroke:var(--text-tertiary)}
+.live-chart .mark.redo text{fill:var(--text-secondary)}
+.chart-key .k-redo::before{border-color:var(--text-tertiary)}
+.register-details{margin:16px 0 0}
+.register-details>.live-row,.register-details>.turn-table-wrap{margin-top:12px}
+.register-modal form>.muted{margin:0 0 12px}

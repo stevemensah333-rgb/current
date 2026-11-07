@@ -15,18 +15,20 @@ export async function api<T>(path:string,method='GET',body?:unknown):Promise<T>{
  if(!response.ok)throw new Error(data.error||`Request failed (${response.status})`)
  return data as T
 }
-export const watts=(value:number|null|undefined)=>value==null?'Unavailable':`${Math.round(value).toLocaleString()} W`
-// Apparent power (VA, from current at 230 V) is never shown as watts.
-export const powerLabel=(value:number|null|undefined,basis?:string|null)=>value==null?'Unavailable':isApparent(basis)?`${Math.round(value).toLocaleString()} VA`:watts(value)
-// The unit for whole-home figures, from how the home total is measured. Single channels use powerLabel with their own basis.
-export const powerUnit=(t:Snapshot|null)=>isApparent(t?.demand_basis)?{long:'VA',short:'VA'}:{long:'watts',short:'W'}
-/** Energy in kWh, or kVAh (estimated) when it was integrated from apparent power. */
-export const energyLabel=(wh:number|null|undefined,methods:string[]=[])=>wh==null?'Unavailable':`${(wh/1000).toFixed(2)} ${methods.some(isApparent)?'kVAh':'kWh'}`
+/** Power in watts, or kilowatts from 1,000 W: 850 -> "850 W", 1350 -> "1.35 kW". */
+export const fmtPower=(value:number)=>Math.abs(value)<1000?`${Math.round(value).toLocaleString()} W`:`${(value/1000).toFixed(2)} kW`
+export const watts=(value:number|null|undefined)=>value==null?'Unavailable':fmtPower(value)
+// Power is shown in watts. From the clamp alone it is estimated from current at 230 V (power factor taken as 1),
+// so it can read a little high for motors and chargers; estimated tells the screen to say so.
+export const powerLabel=(value:number|null|undefined,_basis?:string|null)=>watts(value)
+export const powerUnit=(t:Snapshot|null)=>({long:'watts',short:'W',estimated:isApparent(t?.demand_basis)})
+/** Energy in kWh (estimated when it comes from the clamp alone). */
+export const energyLabel=(wh:number|null|undefined,_methods:string[]=[])=>wh==null?'Unavailable':`${(wh/1000).toFixed(2)} kWh`
 const VALUE_NAMES={shape_diff:'shape',surge_peak:'switch-on surge',settle_ms:'settling time'}
 /** The app, not the gateway, writes every alert sentence. */
 export function alertText(a:Alert,name:(id:string)=>string){
  const who=a.device_id?name(a.device_id):'Home'
  if(a.kind==='fault')return `${who}: ${a.value?VALUE_NAMES[a.value]:'reading'} outside its normal range for several days in a row${a.amount!=null&&a.value==='settle_ms'?` (${Math.round(a.amount)} ms)`:''}.`
- if(a.kind==='missed_event')return `The home total changed by ${a.amount!=null?`${Math.round(a.amount)} VA`:'an unknown amount'} without a recognised switch.`
- return `Something switched off (${a.amount!=null?`${Math.round(a.amount)} VA`:'unknown size'}) that was not on the list.`
+ if(a.kind==='missed_event')return `The home total changed by ${a.amount!=null?fmtPower(a.amount):'an unknown amount'} without a recognised switch.`
+ return `Something switched off (${a.amount!=null?fmtPower(Math.abs(a.amount)):'unknown size'}) that was not on the list.`
 }

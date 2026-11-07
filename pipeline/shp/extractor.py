@@ -124,7 +124,9 @@ def extract(event: Event, settings: Settings) -> Signature:
     clock_min = settings.clock_min_level_mult * th
     if before_level > clock_min:
         cpr, clock = measure_clock(before), "before"   # cpr: mains cycles per reading
-        if s > settings.max_carry_cycles:
+        # Carrying that clock far past the switch only distorts the shape when real current still flows after it.
+        # A charger fading to almost nothing after unplugging (0.24 A -> 0.02 A over 0.5 s) leaves nothing to distort.
+        if s > settings.max_carry_cycles and _level(after) > clock_min:
             low_trust = True
     elif _level(after) > clock_min:
         cpr, clock = measure_clock(after), "after"

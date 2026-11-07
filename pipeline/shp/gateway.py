@@ -26,6 +26,8 @@ from shp.settings import MAINS_V
 
 POST_EVERY_MS = 5000
 LIVE_EVERY_MS = 1000        # registration: live current for the app's chart
+QUIET_MS = 2000             # registration starts with 2 s of the appliance off: the quiet line sets the threshold
+QUIET_MULT = 5              # a switch must stand out 5x the quiet line's flicker, as in calibrate
 MAX_PAUSE_MS = 25000
 QUEUE_MS = 10 * 60 * 1000
 RETRY_MS = 3000             # after a failure, wait 3 s before trying the backend again
@@ -168,6 +170,9 @@ class Gateway:
         self.reg_ended: set[str] = set()      # finished here; the app's answer can lag by one poll
         self.reg_messages = 0
         self.live: list[float] = []            # per-cycle current while registering, sent once a second
+        self.quiet: list[float] | None = None  # per-cycle current during the quiet check; None once it is done
+        self.quiet_start: int | None = None
+        self.quiet_level: float | None = None
         self.next_live: int | None = None
         self.boot = ("replay-" if replay else "") + uuid.uuid4().hex[:12]
         self.channels = sorted({channel_id(d.label) for d in pipeline.library.devices})
@@ -243,6 +248,7 @@ class Gateway:
         log(f"registration {status}: {message}")
         self.reg_ended.add(self.registration)
         self.pipe.teach, self.registration = None, None
+        self._end_quiet()
 
     def _follow_registration(self) -> None:
         """Start, cancel or finish a registration as the app asks, and send every turn back."""
@@ -253,6 +259,7 @@ class Gateway:
             self.reg_ended.add(self.registration)
             self.pipe.teach, self.registration = None, None
             self.pipe.teach_turns = []
+            self._end_quiet()
         if (wanted and self.registration is None and wanted.get("status") in ("waiting", "running")
                 and wanted.get("id") not in self.reg_ended):
             self.registration = wanted["id"]
@@ -264,6 +271,7 @@ class Gateway:
                 return
             self.pipe.teach_turns = []
             self._reg_post("status", {"status": "running", "message": f"listening for {self.pipe.teach.target} turns"})
+            self._start_quiet()
             log(f"registering '{wanted['name']}'")
 
         turns, self.pipe.teach_turns = getattr(self.pipe, "teach_turns", []), []
@@ -272,6 +280,10 @@ class Gateway:
             return
         r3 = lambda v: None if v is None else round(v, 3)   # noqa: E731
         for t in turns:
+            if t.status == "ignored" and session.pending is not None:
+                continue              # the appliance's own wobble during a turn: nothing for the user to see
+            if t.status == "ignored" and t.direction < 0:
+                self._start_quiet()   # it was still on: the switch-off is the start; measure the quiet line again
             self._reg_post("turns", {
                 "status": t.status, "number": t.number, "message": t.message,
                 "at": None if t.t_ms is None else iso(self.pipe.house.to_wall(t.t_ms)),
@@ -295,6 +307,35 @@ class Gateway:
         elif session.varies:
             self._reg_stop("failed", "this device varied a lot between turns; nothing was saved")
 
+    # --- the quiet check: the appliance is off, so whatever flickers on the line now is noise ---------------
+
+    def _start_quiet(self) -> None:
+        self.quiet, self.quiet_start = [], None
+
+    def _end_quiet(self) -> None:
+        """Back to the saved threshold once the registration ends."""
+        self.quiet = self.quiet_start = self.quiet_level = None
+        if hasattr(self.pipe, "detector"):
+            self.pipe.detector.threshold = self.pipe.s.live_threshold_a
+
+    def _quiet_cycle(self, c, wall_ms: int) -> None:
+        """3 s with nothing switching. Example: the line flickers 0.004 A -> 5 x 0.004 = 0.02 A, below the saved
+        0.03 A floor, so the floor stays; a noisier line raises the threshold for this registration."""
+        if self.pipe.capturing:            # something switched: start the 3 s again
+            self.quiet, self.quiet_start = [], None
+            return
+        if self.quiet_start is None:
+            self.quiet_start = wall_ms
+        self.quiet.append(c.current_a)
+        if wall_ms - self.quiet_start < QUIET_MS or len(self.quiet) < 50:
+            return
+        import statistics
+        self.quiet_level = statistics.fmean(self.quiet)
+        threshold = max(self.pipe.s.threshold_a, QUIET_MULT * statistics.pstdev(self.quiet))
+        self.pipe.detector.threshold = threshold
+        log(f"quiet check: line at {self.quiet_level:.3f} A, switches over {threshold:.3f} A ({MAINS_V * threshold:.0f} W) count")
+        self.quiet = None
+
     def _send_live(self, c, wall_ms: int) -> None:
         """While registering: the current of every cycle, once a second, plus what the monitor is doing now.
         measuring = a switch was seen and is being measured; expecting = the switch the user should make next."""
@@ -302,6 +343,8 @@ class Gateway:
         if session is None or self.registration is None:
             self.live, self.next_live = [], None
             return
+        if self.quiet is not None:
+            self._quiet_cycle(c, wall_ms)
         self.live.append(round(c.current_a, 3))
         if self.next_live is None:
             self.next_live = wall_ms + LIVE_EVERY_MS
@@ -310,7 +353,9 @@ class Gateway:
         self.outbox.put(f"/api/v1/gateway/registrations/{self.registration}/live", {
             "schema_version": 1, "at": iso(self.clock.stamp(wall_ms, "live")), "cycle_ms": 20, "amps": self.live,
             "measuring": bool(self.pipe.capturing), "expecting": "off" if session.pending else "on",
-            "kept": len(session.turns)})
+            "kept": len(session.turns), "phase": "quiet" if self.quiet is not None else "turns",
+            "quiet_a": None if self.quiet_level is None else round(self.quiet_level, 4),
+            "threshold_a": round(self.pipe.detector.threshold, 4)})
         self.live, self.next_live = [], wall_ms + LIVE_EVERY_MS
 
     def _heartbeat(self, wall_ms: int) -> None:

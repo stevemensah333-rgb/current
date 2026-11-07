@@ -30,17 +30,17 @@ const PERIOD_HOURS={hour:1,'24h':24,week:168}
 const SYSTEM=`You help a household understand its electricity use. Answer in one to three short, plain sentences.
 Use get_usage for any question about how long or how much. Use switch_off only when the user asks to switch something off; the user must then confirm.
 Use plan_rationing when the user wants prepaid credit or units to last a number of days. Explain its plan as short steps; never work out your own numbers.`
-const VA_NOTE=`Values are apparent power in VA, estimated from current at 230 V; they are not exact watts. p is the pipeline's confidence from 0 to 1.`
+const VA_NOTE=`Power values are watts estimated from current at 230 V, so they are approximate. Say watts or kilowatts. p is the pipeline's confidence from 0 to 1.`
 export const systemPrompt=snapshot=>isApparent(snapshot.demand_basis)?`${SYSTEM}\n${VA_NOTE}`:SYSTEM
 
-const fmt=(value,basis)=>value==null?'unavailable':`${Math.round(value)} ${isApparent(basis)?'VA':'W'}`
+const fmt=value=>value==null?'unavailable':`${Math.round(value)} W`
 
 /** The model's whole view of the house: ids, numbers and fixed words only. */
 export function stateLine(snapshot){
  const appliances=snapshot.devices.filter(d=>d.role==='appliance')
  const on=appliances.filter(d=>d.power_w>0).map(d=>{const p=d.latest?.inference?.confidence;return `${d.id} ${fmt(d.power_w,d.power_basis)}${p!=null?` p ${p.toFixed(2)}`:''}`})
  const parts=[`On now: ${on.length?on.join('; '):'nothing'}.`,`House total ${fmt(snapshot.demand_w,snapshot.demand_basis)}.`]
- if(snapshot.unnamed_va!=null)parts.push(`Not yet named ${Math.round(snapshot.unnamed_va)} VA.`)
+ if(snapshot.unnamed_va!=null)parts.push(`Not yet named ${Math.round(snapshot.unnamed_va)} W.`)
  if(snapshot.alerts?.length)parts.push(`Open alerts: ${snapshot.alerts.map(a=>[a.device_id||'house',a.kind,a.value,a.amount!=null?Math.round(a.amount):null].filter(x=>x!=null).join(' ')).join('; ')}.`)
  parts.push(`Devices: ${appliances.map(d=>d.id).join(', ')||'none'}.`)
  return parts.join(' ')
@@ -172,7 +172,7 @@ export function createAssistant(service,{clock=()=>Date.now(),rationing=null,pro
  }
  function usageText(device,period){
   const u=service.usage(device,periodStart(period),clock())
-  const unit=isApparent(u.energy_basis)?'VAh (estimated)':'Wh'
+  const unit=isApparent(u.energy_basis)?'Wh (estimated)':'Wh'
   const energy=u.energy_wh==null?'energy unknown':`${Math.round(u.energy_wh)} ${unit}`
   const span=period==='today'?'today':`the last ${period==='24h'?'24 hours':period}`
   const coverage=u.covered_hours+0.01<u.period_hours?` (only ${u.covered_hours.toFixed(1)} h of ${span} recorded)`:''

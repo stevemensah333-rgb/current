@@ -101,3 +101,21 @@ def test_shapeless_unknown_entry_is_matched_by_power():
     p = classify(sig(300, CHARGER, direction=-1), off_candidates(house.on_list, Library(), S), NearestModel())
     assert p.matched and p.source == "power"
     assert house.switched_off(sig(300, CHARGER, direction=-1), p) is not None
+
+
+def test_an_appliance_that_varies_between_turns_is_still_named():
+    """Measured on the board: a laptop charger's registered turns differed in shape by up to 0.32. A live switch
+    0.4 away is still that charger; the allowed variation comes from its own turns, not a fixed number."""
+    from shp.extractor import shape_distance
+    shapes = [shape(wave(0.28, third=0.3, phase_deg=a)) for a in (0, 8, 16)]
+    t = TeachSession("laptop", S)
+    for i, sh in enumerate(shapes):
+        t.add(sig(60 + i, sh))
+        t.add(sig(60 + i, sh, direction=-1))
+    lib = Library([t.finish()])
+    live = shape(wave(0.28, third=0.3, phase_deg=22))
+    nearest = min(shape_distance(live, sh) for sh in shapes)
+    assert nearest > lib.devices[0].baseline.shape_limit           # the old fixed rule would say "unknown"
+    p = classify(sig(62, live), on_candidates(lib, S), NearestModel())
+    assert p.label == "laptop" and p.p > 0
+    assert classify(sig(2000, live), on_candidates(lib, S), NearestModel()).label == UNKNOWN   # power still checked

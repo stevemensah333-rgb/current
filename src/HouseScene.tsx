@@ -3,7 +3,7 @@ import {ContactShadows,Edges,Html,Line,OrbitControls} from '@react-three/drei'
 import {createContext,useContext,useEffect,useMemo,useRef} from 'react'
 import * as THREE from 'three'
 import {getFlow,useEnergy} from './store'
-import {powerUnit} from './telemetry'
+import {powerUnit,fmtPower} from './telemetry'
 import {SOURCE_COLORS,type Device,type Room} from './energy'
 import {CELL_D,FLOOR_H,pack,useHome,type Layout,type Placed} from './home/layout'
 import type {Theme} from './theme'
@@ -114,7 +114,7 @@ function House({layout,floor,roof,heatmap,interactive,onSelect,onRoom,focusRoom,
   return <group key={d.id}>
  {!roof&&<><Line points={wire} color={!d.online?'#e38c47':active?'#00bd82':'#70746e'} lineWidth={isSelected?1.3:.7} transparent opacity={active?.6:.18}/><FlowDot points={wire} active={active}/></>}
  <group position={p} onClick={e=>{e.stopPropagation();if(interactive&&!roof)onSelect(d.id)}}><Appliance d={d}/>{isSelected&&!roof&&<mesh rotation={[-Math.PI/2,0,0]} position={[0,y-.01-p[1],0]}><ringGeometry args={[.37,.392,48]}/><meshBasicMaterial color="#00ce87" transparent opacity={.7}/></mesh>}</group>
- {interactive&&!roof&&<Html position={[p[0],p[1]+(d.kind==='fridge'?1.6:d.kind==='lights'?1.35:d.kind==='ac'?1.6:.9),p[2]]} center zIndexRange={[10,0]}><button className={`node-label ${isSelected?'selected':''} ${!d.online?'stale':''}`} onClick={()=>onSelect(d.id)} aria-label={`Select ${d.name}`}><i style={{background:!d.online?'#e38c47':active?'#00ce87':'#7d8583'}}/><span>{d.name}</span><b>{d.online?`${d.reading} ${powerUnit(s.telemetry).short==='VA'?'VA':'watts'}`:'No reading'}</b></button></Html>}
+ {interactive&&!roof&&<Html position={[p[0],p[1]+(d.kind==='fridge'?1.6:d.kind==='lights'?1.35:d.kind==='ac'?1.6:.9),p[2]]} center zIndexRange={[10,0]}><button className={`node-label ${isSelected?'selected':''} ${!d.online?'stale':''}`} onClick={()=>onSelect(d.id)} aria-label={`Select ${d.name}`}><i style={{background:!d.online?'#e38c47':active?'#00ce87':'#7d8583'}}/><span>{d.name}</span><b>{d.online?fmtPower(d.reading):'No reading'}</b></button></Html>}
  </group>})}
  {/* Utility connection and standby generator. */}
  <Block size={[.06,2.1,.06]} position={[4.48,1.01,back+.7]} color={light?'#a3aaa7':'#737c77'}/><Block size={[.71,.06,.08]} position={[4.48,2.03,back+.7]} color={light?'#a3aaa7':'#737c77'}/><Block size={[.23,.39,.16]} position={[4.48,1.45,back+.7]} color={light?'#c6ccc7':'#727d76'}/>

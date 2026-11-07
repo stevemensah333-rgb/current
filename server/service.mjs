@@ -62,7 +62,7 @@ export function createService(db,{clock=()=>Date.now()}={}){
   // How the home total was obtained; "apparent_estimate_va" means VA from a current clamp, not watts.
   const demandBasis=main?main.power_basis:fresh.length?fresh[0].power_basis:'unavailable'
   const apparent=isApparent(demandBasis)
-  const costBasis=apparent?'VA-hours × grid rate. Overstates the bill: power factor and real voltage are unknown.':'Energy at current configured grid rate; not a mixed-source bill'
+  const costBasis=apparent?'Estimated kWh × grid rate. Estimated from current at 230 V, so it can read a little high; check it against your meter.':'Energy at current configured grid rate; not a mixed-source bill'
   const cfgNow=config(db)
   return {schema_version:1,as_of:now(),window_hours:24,devices,settings:cfgNow,simulation:simulation(db),demand_w:demand,demand_basis:demandBasis,unnamed_va:unnamed,alerts:openAlerts(),health:healthList(),demand_scope:main?'whole_home':'monitored_appliances',monitored_power_w:fresh.length?fresh.reduce((s,d)=>s+d.power_w,0):null,unattributed_power_w:main?.power_w!=null&&fresh.length?Math.max(0,main.power_w-fresh.reduce((s,d)=>s+d.power_w,0)):null,energy_wh:totalEnergy,cost_at_grid_rate_ghs:costAtRate(totalEnergy,config(db).rates.grid),cost_basis:costBasis,sources:Object.fromEntries(Object.entries(sourceDevices).map(([role,d])=>[role,d?.power_w??null])),battery_soc_pct:battery?.fresh?battery.latest?.battery_soc_pct??null:null,data_quality:{missing_channels:devices.filter(d=>!d.fresh||d.power_w==null).map(d=>d.id),inferred_channels:devices.filter(d=>d.measurement_kind==='inferred').map(d=>d.id),unknown_energy_intervals:devices.reduce((s,d)=>s+d.unknown_intervals,0)},ai:assistantInfo(cfgNow.assistant.provider)}
  }

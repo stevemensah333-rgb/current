@@ -27,36 +27,36 @@ async function withMonitor(call){
  return gw
 }
 let n=0
-const turn=(fields)=>({schema_version:1,message_id:`t${++n}`,status:'kept',number:1,message:'turn 1 of 5 kept',on_step_va:2000,off_step_va:-2000,shape:[0,1,0,-1],waveform:wave(),...fields})
+const turn=(fields)=>({schema_version:1,message_id:`t${++n}`,status:'kept',number:1,message:'turn 1 of 3 kept',on_step_va:2000,off_step_va:-2000,shape:[0,1,0,-1],waveform:wave(),...fields})
 
 test('channel ids match the pipeline',()=>{
  assert.equal(channelId('Kitchen Kettle'),'kitchen-kettle')
  assert.equal(channelId('  ##  '),'device')
 })
 
-test('registration: 5 kept turns with waveforms, then the device channel exists',async()=>{
+test('registration: 3 kept turns with waveforms, then the device channel exists',async()=>{
  const {call,close}=await server();try{
   assert.equal((await call('/registrations','POST','owner-secret',{name:'Kettle'})).status,409)   // no monitor yet
   const gw=await withMonitor(call)
   const started=await call('/registrations','POST','owner-secret',{name:'Kettle',kind:'kettle',room:'Kitchen'})
-  assert.equal(started.status,201);assert.equal(started.data.status,'waiting');assert.equal(started.data.target,5)
+  assert.equal(started.status,201);assert.equal(started.data.status,'waiting');assert.equal(started.data.target,3)
   const id=started.data.id
   assert.equal((await call('/registrations','POST','owner-secret',{name:'Fan'})).status,409)      // one at a time
   // the gateway sees it
   const asked=await call('/gateway/registration','GET',gw)
-  assert.deepEqual([asked.data.registration.id,asked.data.registration.name,asked.data.registration.turns],[id,'Kettle',5])
+  assert.deepEqual([asked.data.registration.id,asked.data.registration.name,asked.data.registration.turns],[id,'Kettle',3])
   assert.equal((await call('/gateway/registration','GET','owner-secret')).status,401)
   // a waiting switch-on, a redo, then 5 kept turns
   await call(`/gateway/registrations/${id}/turns`,'POST',gw,turn({status:'waiting',message:'turn 1: switched on',off_step_va:null,waveform:null}))
   await call(`/gateway/registrations/${id}/turns`,'POST',gw,turn({status:'redo',message:'turn 1 redo'}))
   assert.equal((await call(`/gateway/registrations/${id}/status`,'POST',gw,{schema_version:1,message_id:'s0',status:'done'})).status,409)  // not 5 yet
-  for(let k=1;k<=5;k++){
-   const r=await call(`/gateway/registrations/${id}/turns`,'POST',gw,turn({number:k,message:`turn ${k} of 5 kept`,waveform:wave(500)}))  // the largest capture fits
+  for(let k=1;k<=3;k++){
+   const r=await call(`/gateway/registrations/${id}/turns`,'POST',gw,turn({number:k,message:`turn ${k} of 3 kept`,waveform:wave(500)}))  // the largest capture fits
    assert.equal(r.status,200,JSON.stringify(r.data))
   }
   const view=(await call(`/registrations/${id}`,'GET','owner-secret')).data
-  assert.equal(view.status,'running');assert.equal(view.kept,5);assert.equal(view.turns.length,7)
-  assert.deepEqual(view.turns.map(t=>t.status),['waiting','redo','kept','kept','kept','kept','kept'])
+  assert.equal(view.status,'running');assert.equal(view.kept,3);assert.equal(view.turns.length,5)
+  assert.deepEqual(view.turns.map(t=>t.status),['waiting','redo','kept','kept','kept'])
   assert.equal(view.turns[0].has_waveform,false);assert.equal(view.turns[2].has_waveform,true)
   assert.equal(view.turns[2].waveform,undefined)                     // the list stays small; the waveform is fetched per turn
   // the stored raw waveform comes back as sent
@@ -88,7 +88,7 @@ test('registration input is checked',async()=>{
   const id=(await call('/registrations','POST','owner-secret',{name:'Fan'})).data.id
   const bad=async fields=>(await call(`/gateway/registrations/${id}/turns`,'POST',gw,turn(fields))).status
   assert.equal(await bad({status:'maybe'}),400)
-  assert.equal(await bad({number:6}),400)
+  assert.equal(await bad({number:4}),400)
   assert.equal(await bad({waveform:{...wave(),readings_per_cycle:16}}),400)        // every cycle must hold 16
   assert.equal(await bad({waveform:{...wave(),on:{t_ms:0,before:[[NaN]],after:[]}}}),400)
   assert.equal(await bad({waveform:wave(601)}),400)                                 // longer than any capture

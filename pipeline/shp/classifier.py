@@ -91,6 +91,18 @@ def off_candidates(on_list, library: Library, settings: Settings) -> list[Candid
     return out
 
 
+SPREAD_MARGIN = 1.5   # an appliance may vary 1.5 x as much as its own registered turns did
+
+
+def _limit(c: Candidate) -> float:
+    """How far a new switch may be from this appliance's examples and still be it, learned from the appliance
+    itself: its turns differed by up to 0.32 (a laptop charger) -> 0.48 allowed; a steady kettle stays strict."""
+    import itertools
+    shapes = [ex.steady for ex in c.examples if ex.shape_ok]
+    spread = max((shape_distance(a, b) for a, b in itertools.combinations(shapes, 2)), default=0.0)
+    return max(c.shape_limit, SPREAD_MARGIN * spread)
+
+
 def _channels(sig: Signature, with_surge: bool) -> list:
     return [sig.steady, sig.surge] if with_surge else [sig.steady]
 
@@ -145,10 +157,10 @@ def classify(sig: Signature, cands: list[Candidate], model: Model) -> Prediction
 
     if len(usable) == 1:
         c = usable[0]
-        d = closest(c)
-        if d > c.shape_limit:
+        d, limit = closest(c), _limit(c)
+        if d > limit:
             return unknown(True)
-        p = max(0.0, min(1.0, 1 - d / c.shape_limit))
+        p = max(0.0, min(1.0, 1 - d / limit))
         return Prediction(c.label, p, ((c.label, p),), True, "match", True, nearest, nearest_d)
 
     X_train, y_train = [], []
@@ -168,6 +180,6 @@ def classify(sig: Signature, cands: list[Candidate], model: Model) -> Prediction
                                "fix the column mapping in classify()")
         _columns_checked = True
     winner = next(c for c in usable if c.label == ranked[0][0])
-    if closest(winner) > winner.shape_limit:
+    if closest(winner) > _limit(winner):
         return unknown(True, "timee")
     return Prediction(ranked[0][0], ranked[0][1], ranked, True, "timee", True, nearest, nearest_d)

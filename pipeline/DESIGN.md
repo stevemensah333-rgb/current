@@ -152,19 +152,20 @@ kettle's fixed baseline for the fault monitor.
 
 ### Turns
 
-A turn is one switch-on followed by its switch-off. Registration needs exactly 5 kept turns.
+A turn is one switch-on followed by its switch-off. Registration needs exactly 3 kept turns.
+It starts with 2 s of the appliance off: the quiet line sets the threshold (5 x its flicker, never below the saved floor).
+During a turn, a change under half the switch-on is the appliance's own wobble and is ignored.
 
 ```
 session = TeachSession("kettle", setting=None)
 for each signature during registration:
-  refuse it if: not clean, not settled, not shape_ok, or low_trust     # refused switches do not count
+  refuse it only if: not clean (lost readings) or not shape_ok (no wave) # refused switches do not count
                                              # low_trust → "switch off other big loads and try again"
   switch-on  → hold it and ask for the switch-off
-  switch-off → with the held switch-on it makes a turn. Redo the turn if:
-               the off step is not about the on step (10 % or the noise floor), or
-               its power or shape is odd compared with the turns already kept (kept turns always stay)
-  stop after 5 redos and report "this device varies a lot"
-session.finish(): needs 5 kept turns → 5 on- and 5 off-examples
+  switch-off → with the held switch-on it makes a turn, kept as measured (TimEE judges similarity later)
+  a change under half the switch-on while a turn is open is the appliance's own wobble: ignored
+  an unusable switch-off (lost readings, no wave) is a redo; stop after 5 redos
+session.finish(): needs 3 kept turns → 3 on- and 3 off-examples
 Each turn also keeps its raw waveform: 10 cycles before and every cycle after both switches.
 The app stores it with the turn (registration_turns table in the backend database).
 ```

@@ -284,7 +284,7 @@ def test_health_summaries_are_posted(library):
     assert h["device_id"] == "fridge" and h["status"] == "watch" and h["settle_ms"] == 400.0 and "label" not in h
 
 
-# registration from the app: 5 turns, each sent back with its raw waveform
+# registration from the app: 3 turns, each sent back with its raw waveform
 
 def register(library, segments, wanted):
     posted, now = [], {"t": 0}
@@ -308,14 +308,14 @@ def test_gateway_runs_a_registration_and_adds_the_device(library):
     turns = [p for path, p in posted if path == "/api/v1/gateway/registrations/ab12/turns"]
     status = [p for path, p in posted if path == "/api/v1/gateway/registrations/ab12/status"]
     assert [p["status"] for p in status] == ["running", "done"] and status[-1]["device_id"] == "heater"
-    assert [t["status"] for t in turns] == ["waiting", "kept"] * 5
+    assert [t["status"] for t in turns][:6] == ["waiting", "kept"] * 3
     kept = [t for t in turns if t["status"] == "kept"]
-    assert [t["number"] for t in kept] == [1, 2, 3, 4, 5]
+    assert [t["number"] for t in kept] == [1, 2, 3]
     assert all(len(t["waveform"]["on"]["before"]) == 10 and t["waveform"]["readings_per_cycle"] == 17 for t in kept)
     assert all(t["on_step_va"] > 900 and t["off_step_va"] < -900 and len(t["shape"]) == 50 for t in kept)
     assert len(json.dumps(kept[0]).encode()) < 1 << 20                 # fits the backend's body limit
     entry = lib.get("Heater")
-    assert entry is not None and len(entry.on_examples) == 5 and entry.room == "Bedroom" and saved
+    assert entry is not None and len(entry.on_examples) == 3 and entry.room == "Bedroom" and saved
     assert "heater" in g.channels and pipe.teach is None
     # while registering, the heater was never classified or posted as another device
     assert not [p for path, p in posted if path.endswith("/readings") and p["device_id"] in ("kettle", "fridge")
@@ -351,3 +351,27 @@ def test_registration_sends_live_current_and_switch_times(library):
     assert on["status"] == "waiting" and on["direction"] == 1 and on["at"].endswith("Z")
     assert on["before_a"] < 0.1 and abs(on["after_a"] - 4.0) < 0.1
     assert kept["status"] == "kept" and kept["direction"] == -1 and kept["settle_ms"] is not None
+
+
+def test_registration_starts_with_a_quiet_check_that_sets_the_threshold(library):
+    lib = Library(list(library.devices))
+    # 4 s off (the quiet check), then one turn
+    g, pipe, posted, _ = register(lib, [(200, OFF), (120, HEATER), (60, OFF)], {"now": REG})
+    live = [p for path, p in posted if path.endswith("/live")]
+    assert live[0]["phase"] == "quiet" and live[-1]["phase"] == "turns"
+    assert live[-1]["threshold_a"] >= S.threshold_a                     # never below the saved floor
+    assert live[-1]["quiet_a"] is not None and live[-1]["quiet_a"] < 0.05
+    turns = [p for path, p in posted if path.endswith("/turns")]
+    assert [t["status"] for t in turns] == ["waiting", "kept"]
+
+
+def test_an_appliance_left_on_restarts_the_quiet_check(library):
+    lib = Library(list(library.devices))
+    # the heater is on when registration starts; switching it off is the start, then the quiet check runs again
+    g, pipe, posted, _ = register(lib, [(120, HEATER), (200, OFF)], {"now": REG})
+    turns = [p for path, p in posted if path.endswith("/turns")]
+    assert turns[0]["status"] == "ignored"
+    live = [p for path, p in posted if path.endswith("/live")]
+    assert live[0]["phase"] == "quiet" and live[-1]["phase"] == "turns"
+    assert live[-1]["quiet_a"] < 0.05                                   # measured with the heater off, not on
+    assert live[-1]["expecting"] == "on" and pipe.detector.threshold >= S.threshold_a

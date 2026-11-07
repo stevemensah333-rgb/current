@@ -94,3 +94,41 @@ def test_pipeline_names_devices_and_tracks_the_house():
     assert names == [["fridge"], ["fridge", "kettle"], ["fridge"], ["nothing on"]]
     assert pipe.house.on_list == []
     assert [c.label for c in pipe.house.log] == ["fridge", "kettle", "kettle", "fridge"]
+
+
+def test_small_drift_is_not_named_listed_or_alerted():
+    from shp.app import Pipeline
+    from helpers import NearestModel, cycles_from, wave
+    s = Settings(threshold_a=0.02)
+    pipe = Pipeline(s, Library(), NearestModel(), now_ms=None)
+    # a charger drawing 0.25 A that dips by 0.05 A (about 12 W) for a while
+    for c in cycles_from([(60, wave(0.25)), (120, wave(0.20)), (120, wave(0.25))], seed=3):
+        pipe.feed(c)
+    assert not [f for f in pipe.flags if f["kind"] == "unexplained_off"]
+    assert all(abs(sig.step_va) >= s.min_event_va for _, sig, _ in pipe.events)
+
+
+def test_a_silent_board_is_reopened(monkeypatch):
+    """A stalled USB-serial chip stays 'connected' but sends nothing; the source must reopen the port."""
+    import itertools
+    from shp import sources
+    opened = []
+
+    class Port:
+        def __init__(self, lines):
+            self.lines = iter(lines)
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def readline(self):
+            return next(self.lines, b"")
+
+    scripts = iter([[b"s,1\n", b"s,2\n"], [b"s,3\n"]])   # first open: 2 lines then silence; second open: 1 line
+
+    def opener(*a, **k):
+        opened.append(1)
+        return Port(next(scripts))
+    monkeypatch.setattr(sources.time, "sleep", lambda s: None)   # no real waiting in the test
+    out = list(itertools.islice(sources.from_serial("COM9", opener=opener, silent_s=0), 3))
+    assert out == ["s,1", "s,2", "s,3"] and len(opened) == 2

@@ -1,6 +1,6 @@
 """Teach mode and the device library.
 
-A TeachSession (registration) collects exactly 5 turns for one device: one switch-on plus its switch-off each.
+A TeachSession (registration) collects exactly 3 turns for one device: one switch-on plus its switch-off each.
 An odd turn is redone; kept turns stay. Each turn keeps its raw waveform.
 finish() gives a DeviceEntry: the turns (examples for the classifier) and a fixed baseline (fault monitor).
 The Library holds every DeviceEntry plus the working examples, and saves to library.json.
@@ -71,6 +71,7 @@ class DeviceEntry:
 
 
 ROOM_MAX = 16   # the app limits room names to 16 characters
+WOBBLE_FRAC = 0.5   # during a turn, a change under half the switch-on is the appliance's own wobble
 
 
 def base_name(label: str) -> str:
@@ -124,24 +125,22 @@ def raw_waveform(on_event, off_event) -> dict | None:
 
 
 def _refusal(sig: Signature) -> str | None:
+    """Only what makes a turn unusable as an example: lost readings, or no wave to learn from. Whether turns look
+    alike is not decided here; TimEE compares each live switch with all the kept turns and judges that itself."""
     if not sig.clean:
         return "readings were lost"
-    if not sig.settled:
-        return "the device never settled"
     if not sig.shape_ok:
         return "no shape could be read"
-    if sig.low_trust:
-        return "other big loads are on; switch them off"
     return None
 
 
 class TeachSession:
-    """Registration: exactly settings.teach_turns (5) turns. add() each signature while the user switches the
+    """Registration: exactly settings.teach_turns (3) turns. add() each signature while the user switches the
     device on, waits for it to settle, then switches it off.
 
-    A turn is kept only when its switch-on and switch-off are both usable, the switch-off removes about what the
-    switch-on added, and both look like the turns already kept. A turn that does not is a redo: the turns
-    already kept stay. Refused switches do not count. After settings.max_redos redos the device varies a lot."""
+    A turn is kept when its switch-on and switch-off are both usable (no lost readings, a wave to learn from).
+    Natural variation between turns is kept as it is: TimEE judges similarity when it names a live switch.
+    An unusable switch-off makes the turn a redo; after settings.max_redos of those, registration stops."""
 
     def __init__(self, name: str, settings: Settings, setting: str | None = None,
                  kind: str = "generic", room: str = "Living room"):
@@ -187,6 +186,10 @@ class TeachSession:
         if self.ready:
             return Turn("ignored", f"all {self.target} turns are done")
         why = _refusal(sig)
+        # While a turn is open, a change much smaller than its switch-on is the appliance's own wobble (a laptop
+        # charger's draw drifts as the battery charges), not the user switching. Example: on +57 W, then -14 W -> wobble.
+        if self.pending is not None and abs(sig.step_va) < WOBBLE_FRAC * abs(self.pending[0].step_va):
+            return Turn("ignored", "a small change while it is on; keep it on until the screen says to switch it off", n)
         if sig.direction > 0:
             if why:
                 return Turn("refused", f"switch-on refused: {why}. Switch it off, then do turn {n} again.", n)
@@ -199,7 +202,7 @@ class TeachSession:
         on, on_event = self.pending
         self.pending = None
         wave = raw_waveform(on_event, event)
-        problem = f"switch-off refused: {why}" if why else (self._mismatch(on, sig) or self._odd(on, sig))
+        problem = f"switch-off refused: {why}" if why else None   # no hand-made similarity rules: TimEE judges
         if problem:
             self.redos += 1
             msg = f"turn {n} redo: {problem}. Do turn {n} again."
@@ -212,36 +215,6 @@ class TeachSession:
         if self.ready:
             turn.message += f"; all {self.target} turns done"
         return turn
-
-    def _step_limit(self, steps) -> float:
-        floor = MAINS_V * self.settings.threshold_a
-        return max(3 * mad(steps), floor) if len(steps) > 1 else floor
-
-    def _mismatch(self, on: Signature, off: Signature) -> str | None:
-        """The switch-off should remove what the switch-on added. Example: on +2000 VA, off -1700 VA -> redo."""
-        a, b = abs(on.step_va), abs(off.step_va)
-        limit = max(self.settings.power_tolerance_frac * a, MAINS_V * self.settings.threshold_a)
-        if abs(a - b) > limit:
-            return (f"the switch-off ({b:.0f} VA) did not match the switch-on ({a:.0f} VA); "
-                    "something else may have changed")
-        return None
-
-    def _odd(self, on: Signature, off: Signature) -> str | None:
-        """Compared with the kept turns: power step within 3 x MAD of their middle (never less than the noise
-        floor), and shape within 3 x MAD of their middle shape (never less than shape_floor)."""
-        if not self.turns:
-            return None
-        for word, new, kept in (("switch-on", on, self.on), ("switch-off", off, self.off)):
-            steps = [abs(s.step_va) for s in kept]
-            mid_step = statistics.median(steps)
-            if abs(abs(new.step_va) - mid_step) > self._step_limit(steps):
-                return f"the {word} power ({abs(new.step_va):.0f} VA) is far from the other turns (about {mid_step:.0f} VA)"
-            mid = np.median([s.steady for s in kept], axis=0)
-            spread = [shape_distance(s.steady, mid) for s in kept]
-            limit = max(3 * mad(spread), self.settings.shape_floor) if len(kept) > 1 else self.settings.shape_floor
-            if shape_distance(new.steady, mid) > limit:
-                return f"the {word} shape is different from the other turns"
-        return None
 
     def finish(self) -> DeviceEntry:
         if not self.ready:

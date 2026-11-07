@@ -1,4 +1,4 @@
-// Registering an appliance: 5 turns, each one switch-on and its switch-off, run by the NILM gateway.
+// Registering an appliance: 3 turns, each one switch-on and its switch-off, run by the NILM gateway.
 // The app starts a registration; the gateway asks for it, listens, and sends every turn back with its raw waveform.
 // Example: POST /registrations {name:"kettle"} -> the gateway posts turn 1 "waiting" (switched on), then turn 1 "kept"
 // (switched off, with ~10 KB of raw readings) ... turn 5 "kept", then status "done" -> a "kettle" channel exists.
@@ -6,7 +6,7 @@ import {randomBytes} from 'node:crypto'
 import {allDevices} from './database.mjs'
 import {fail,object,keys,id,text,number,optionalNumber,oneOf} from './validation.mjs'
 
-export const TURNS=5
+export const TURNS=3
 const ACTIVE=['waiting','running']
 const TURN_STATUS=['kept','waiting','redo','refused','ignored']
 const ROOM_MAX=16              // the pipeline's limit, as named in the app's home
@@ -101,7 +101,7 @@ export function createRegistrations(db,{clock=()=>Date.now(),registerDevice}){
  }
  // --- the gateway's side ---
  function addLive(regId,raw,gateway){
-  const r=ownActive(regId,gateway),v=object(raw);keys(v,['schema_version','at','cycle_ms','amps','measuring','expecting','kept'])
+  const r=ownActive(regId,gateway),v=object(raw);keys(v,['schema_version','at','cycle_ms','amps','measuring','expecting','kept','phase','quiet_a','threshold_a'])
   if(v.schema_version!==1)fail('Unsupported schema_version; expected 1')
   const at=Date.parse(isoTime(v.at,'at')),cycle=number(v.cycle_ms,'cycle_ms',1,1000)
   if(!Array.isArray(v.amps)||v.amps.length>500)fail('amps must be a list of at most 500 numbers')
@@ -111,7 +111,8 @@ export function createRegistrations(db,{clock=()=>Date.now(),registerDevice}){
   const per=Math.max(1,Math.round(LIVE_POINT_MS/cycle))
   for(let i=0;i<amps.length;i+=per){const part=amps.slice(i,i+per);state.points.push([at-(amps.length-i-part.length)*cycle,part.reduce((a,b)=>a+b,0)/part.length])}
   state.points=state.points.filter(p=>p[0]>at-LIVE_MS)
-  Object.assign(state,{at,amps:amps.length?amps.slice(-10).reduce((a,b)=>a+b,0)/Math.min(10,amps.length):state.amps??null,measuring:Boolean(v.measuring),expecting:oneOf(v.expecting,'expecting',['on','off']),kept:number(v.kept??0,'kept',0,TURNS)})
+  Object.assign(state,{at,amps:amps.length?amps.slice(-10).reduce((a,b)=>a+b,0)/Math.min(10,amps.length):state.amps??null,measuring:Boolean(v.measuring),expecting:oneOf(v.expecting,'expecting',['on','off']),kept:number(v.kept??0,'kept',0,TURNS),
+   phase:oneOf(v.phase??'turns','phase',['quiet','turns']),quiet_a:optionalNumber(v.quiet_a,'quiet_a',0,1e4),threshold_a:optionalNumber(v.threshold_a,'threshold_a',0,1e4)})
   live.set(r.id,state)
   if(r.status==='waiting')db.prepare('UPDATE registrations SET status=?,message=?,updated_at=? WHERE id=?').run('running','Listening.',now(),r.id)
   return {ok:true}
@@ -121,7 +122,7 @@ export function createRegistrations(db,{clock=()=>Date.now(),registerDevice}){
   const r=row(regId),state=live.get(r.id)
   if(!state)return {listening:false,points:[],now:null}
   const fresh=clock()-state.at<LIVE_STALE_MS&&ACTIVE.includes(r.status)
-  return {listening:fresh,points:state.points,now:{at:new Date(state.at).toISOString(),amps:state.amps,measuring:state.measuring,expecting:state.expecting,kept:state.kept}}
+  return {listening:fresh,points:state.points,now:{at:new Date(state.at).toISOString(),amps:state.amps,measuring:state.measuring,expecting:state.expecting,kept:state.kept,phase:state.phase,quiet_a:state.quiet_a,threshold_a:state.threshold_a}}
  }
  function forGateway(gateway){
   const r=db.prepare(`SELECT * FROM registrations WHERE gateway_id=? AND status IN ('waiting','running')`).get(gateway.id)
