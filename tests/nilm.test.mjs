@@ -118,7 +118,7 @@ test('get_usage answers from stored readings; switch_off asks for a single-use, 
  f.mains(2093,0);f.kettle(2000,.94,0);f.advance(5000);f.mains(2093,0);f.kettle(2000,.94,0)
  const a=createAssistant(f.service,{clock:f.now,providers:{local:scripted({tool:'get_usage',input:{device:'kettle',period:'hour'}},{answer:'ok'}),cloud:null}})
  const j=a.start({message:'how long?'}).job_id;await until(()=>a.view(j).status==='done')
- assert.match(a.view(j).reply,/kettle: 0\.00 h on, 3 VAh \(estimated\) in the last hour \(only 0\.0 h of the last hour recorded\)\./);assert.match(a.view(j).reply,/get_usage,switch_off/)
+ assert.match(a.view(j).reply,/kettle: 0\.00 h on, 3 VAh \(estimated\) in the last hour \(only 0\.0 h of the last hour recorded\)\./);assert.match(a.view(j).reply,/get_usage,plan_rationing,switch_off/)
  const b=createAssistant(f.service,{clock:f.now,providers:{local:scripted({tool:'switch_off',input:{device:'kettle'}},{answer:'asked'}),cloud:null}})
  const k=b.start({message:'switch the kettle off'}).job_id;await until(()=>b.view(k).status==='done')
  const {token,device}=b.view(k).confirm;assert.equal(device,'kettle')

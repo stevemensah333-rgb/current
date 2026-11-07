@@ -9,8 +9,9 @@ import {createService} from './service.mjs'
 import {ApiError,fail} from './validation.mjs'
 import {createAssistant} from './assistant.mjs'
 import {createRegistrations,WAVEFORM_MAX_BYTES} from './registration.mjs'
+import {createRationing} from './rationing.mjs'
 export function createApp({databasePath,ownerToken,clock,assistantProviders}={}){
- const db=openDatabase(databasePath),service=createService(db,{clock}),registrations=createRegistrations(db,{clock,registerDevice:service.registerDevice}),assistant=createAssistant(service,{clock,...(assistantProviders?{providers:assistantProviders}:{})})
+ const db=openDatabase(databasePath),service=createService(db,{clock}),registrations=createRegistrations(db,{clock,registerDevice:service.registerDevice}),rationing=createRationing(db,service,{clock}),assistant=createAssistant(service,{clock,rationing,...(assistantProviders?{providers:assistantProviders}:{})})
  const server=createServer(async(req,res)=>{
   res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff')
   const send=(status,data)=>{res.writeHead(status);res.end(JSON.stringify(data))}
@@ -55,6 +56,11 @@ export function createApp({databasePath,ownerToken,clock,assistantProviders}={})
    const job=path.match(/^\/api\/v1\/assistant\/([a-f0-9]+)$/)
    if(job&&method==='GET')return send(200,assistant.view(job[1]))
    if(job&&method==='DELETE')return send(200,assistant.cancel(job[1]))
+   if(path==='/api/v1/rationing/preview'&&method==='POST')return send(200,rationing.preview(body))
+   if(path==='/api/v1/rationing'&&method==='GET')return send(200,rationing.current())
+   if(path==='/api/v1/rationing'&&method==='PUT')return send(200,rationing.save(body))
+   if(path==='/api/v1/rationing'&&method==='DELETE')return send(200,rationing.end())
+   if(path==='/api/v1/rationing/meter'&&method==='POST')return send(200,rationing.addMeterReading(body))
    if(path==='/api/v1/registrations'&&method==='POST')return send(201,registrations.start(body))
    if(path==='/api/v1/registrations/current'&&method==='GET')return send(200,registrations.current())
    const reg=path.match(/^\/api\/v1\/registrations\/([a-f0-9]+)$/)
@@ -74,7 +80,7 @@ export function createApp({databasePath,ownerToken,clock,assistantProviders}={})
   }catch(e){const conflict=e.code?.startsWith('ERR_SQLITE')&&/UNIQUE constraint/.test(e.message);const status=e instanceof ApiError?e.status:conflict?409:500;if(status===500)console.error('API error:',e.message);send(status,{error:status===500?'Internal server error':conflict?'Conflicting ID, sequence or timestamp':e.message})}
  })
  server.requestTimeout=15000;server.headersTimeout=10000
- return {server,db,service,registrations}
+ return {server,db,service,registrations,rationing}
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const path=resolve(process.env.APEIRON_DB||'.data/apeiron.sqlite');mkdirSync(dirname(path),{recursive:true,mode:0o700})

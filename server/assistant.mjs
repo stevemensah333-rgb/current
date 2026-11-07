@@ -6,6 +6,7 @@ import {randomBytes} from 'node:crypto'
 import Anthropic from '@anthropic-ai/sdk'
 import {isApparent} from '../shared/calculations.ts'
 import {ApiError,fail,object,keys,text} from './validation.mjs'
+import {planText} from './rationing.mjs'
 
 // The caller's cancel signal plus a time limit: whichever comes first stops the request.
 const withLimit=(signal,ms)=>signal?AbortSignal.any([signal,AbortSignal.timeout(ms)]):AbortSignal.timeout(ms)
@@ -27,7 +28,8 @@ const CONFIRM_MS=5*60000
 const PERIOD_HOURS={hour:1,'24h':24,week:168}
 
 const SYSTEM=`You help a household understand its electricity use. Answer in one to three short, plain sentences.
-Use get_usage for any question about how long or how much. Use switch_off only when the user asks to switch something off; the user must then confirm.`
+Use get_usage for any question about how long or how much. Use switch_off only when the user asks to switch something off; the user must then confirm.
+Use plan_rationing when the user wants prepaid credit or units to last a number of days. Explain its plan as short steps; never work out your own numbers.`
 const VA_NOTE=`Values are apparent power in VA, estimated from current at 230 V; they are not exact watts. p is the pipeline's confidence from 0 to 1.`
 export const systemPrompt=snapshot=>isApparent(snapshot.demand_basis)?`${SYSTEM}\n${VA_NOTE}`:SYSTEM
 
@@ -49,6 +51,8 @@ function toolSpecs(snapshot){
  const specs=[]
  if(ids.length)specs.push({name:'get_usage',description:'Hours on and energy of one device over a period. today = since local midnight.',
   schema:{type:'object',properties:{device:{type:'string',enum:ids},period:{type:'string',enum:['hour','today','24h','week']}},required:['device','period'],additionalProperties:false}})
+ specs.push({name:'plan_rationing',description:'Plan how to make prepaid credit last: which devices to limit or switch off. amount is the credit in GHS (unit ghs) or kWh units (unit kwh).',
+  schema:{type:'object',properties:{amount:{type:'number'},unit:{type:'string',enum:['ghs','kwh']},days:{type:'number'},keep_on:{type:'array',items:ids.length?{type:'string',enum:ids}:{type:'string'}}},required:['amount','unit','days','keep_on'],additionalProperties:false}})
  if(onIds.length)specs.push({name:'switch_off',description:'Ask to switch off a device that is on now. The user must confirm with a button.',
   schema:{type:'object',properties:{device:{type:'string',enum:onIds}},required:['device'],additionalProperties:false}})
  return specs
@@ -158,7 +162,7 @@ export function cloudChat({client}={}){
  }
 }
 
-export function createAssistant(service,{clock=()=>Date.now(),providers={local:localChat(),cloud:CLOUD_PROVIDER==='claude'?cloudChat():deepseekChat()}}={}){
+export function createAssistant(service,{clock=()=>Date.now(),rationing=null,providers={local:localChat(),cloud:CLOUD_PROVIDER==='claude'?cloudChat():deepseekChat()}}={}){
  const jobs=new Map(),confirms=new Map();let running=null
 
  function periodStart(period){
@@ -181,6 +185,10 @@ export function createAssistant(service,{clock=()=>Date.now(),providers={local:l
     if(!ids.includes(input?.device)||!['hour','today','24h','week'].includes(input?.period))return 'Unknown device or period.'
     return usageText(input.device,input.period)
    }
+   if(name==='plan_rationing'){
+    if(!rationing)return 'Credit planning is not available.'
+    try{return planText(rationing.preview(input))}catch(e){if(e instanceof ApiError)return e.message;throw e}
+   }
    if(name==='switch_off'){
     const d=snapshot.devices.find(x=>x.id===input?.device&&x.role==='appliance')
     if(!d||!(d.power_w>0))return `${input?.device} is not on.`
@@ -201,7 +209,7 @@ export function createAssistant(service,{clock=()=>Date.now(),providers={local:l
   jobs.set(job.id,job);running=job
   if(jobs.size>20)jobs.delete(jobs.keys().next().value)
   const snapshot=service.snapshot()
-  providers[provider]({system:systemPrompt(snapshot),user:`House now: ${stateLine(snapshot)}\n\nQuestion: ${message}`,specs:toolSpecs(snapshot),
+  providers[provider]({system:systemPrompt(snapshot),user:`House now: ${stateLine(snapshot)}${rationing?.stateText()?` ${rationing.stateText()}`:''}\n\nQuestion: ${message}`,specs:toolSpecs(snapshot),
    execute:makeExecute(job),signal:job.controller.signal,maxRounds:MAX_ROUNDS[provider]})
    .then(reply=>{if(job.status==='running'){job.status='done';job.reply=reply||'(no answer)'}})
    .catch(e=>{if(job.status==='running'){job.status='failed';job.error=e instanceof ApiError?e.message:'The assistant failed. Try again.';if(!(e instanceof ApiError))console.error('Assistant error:',e.message)}})

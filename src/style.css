@@ -194,3 +194,57 @@
 @media(prefers-reduced-motion:reduce){.listen-pill.on i,.do-now-action{animation:none!important}}
 .live-load .last-step{margin-top:auto;padding-top:8px;border-top:1px solid var(--border);color:var(--text)}
 @media(max-width:760px){.live-load .last-step{margin-top:0;padding-top:0;border-top:none}}
+/* Make your credit last: the plan preview, then the plan day by day. */
+.credit-screen{padding:24px;display:grid;gap:16px}
+.credit-intro h2{margin:0}
+.credit-intro .muted{margin:8px 0 0}
+.credit-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end}
+.credit-form label{margin:0}
+.unit-toggle{grid-column:1/-1;border:none;padding:0;margin:0;display:flex;gap:8px;flex-wrap:wrap}
+.unit-toggle legend{font-size:13px;color:var(--text-secondary);margin-bottom:8px;padding:0}
+.unit-toggle label{flex-direction:row;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--border);border-radius:999px;cursor:pointer;font-size:14px;color:var(--text)}
+.unit-toggle label.active{border-color:var(--primary);background:var(--selection)}
+.unit-toggle input{width:auto;accent-color:var(--primary)}
+.credit-result{display:grid;gap:12px;border-top:1px solid var(--border);padding-top:16px}
+.credit-result h3,.credit-status h3{margin:0;font-size:19px;line-height:1.35;color:var(--text)}
+.credit-facts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.credit-facts>div{border:1px solid var(--border);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:3px;background:var(--surface)}
+.credit-facts span{font-size:12px;color:var(--text-secondary)}
+.credit-facts b{font-size:20px;color:var(--text);font-variant-numeric:tabular-nums}
+.credit-facts small{font-size:12px;color:var(--text-secondary)}
+.credit-facts .gap{border-color:var(--alert-border);background:var(--alert-surface)}
+.credit-facts .gap b{color:var(--alert-text)}
+.cut-list,.kept-list,.meter-readings{list-style:none;margin:0;padding:0}
+.cut-list li{display:grid;grid-template-columns:96px 1fr auto;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+.cut-list li>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cut-list small{font-size:12px;color:var(--text-secondary)}
+.cut-list li.over small{color:var(--alert-text)}
+.cut-action{font-size:12px;font-weight:600;text-align:center;padding:5px 8px;border-radius:6px;background:var(--surface);border:1px solid var(--border);color:var(--text)}
+.cut-action.off{background:var(--alert-surface);border-color:var(--alert-border);color:var(--alert-text)}
+.kept-list li{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text-secondary);padding:4px 0}
+.kept-list li svg{color:var(--success-text);flex:none}
+.kept-list li .text-link{margin-left:auto}
+.credit-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.credit-actions .primary{margin-left:0}
+.credit-ai{border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)}
+.credit-ai p{margin:0;line-height:1.55;white-space:pre-wrap}
+.credit-ai .eyebrow{margin-bottom:6px}
+.credit-status{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:10px;border:1px solid var(--success-border);background:var(--success-surface);color:var(--success-text)}
+.credit-status p{margin:3px 0 0;font-size:13px;color:var(--text-secondary)}
+.credit-status svg{flex:none;margin-top:2px}
+.credit-status.over_today,.credit-status.over_limit,.credit-status.used_up{border-color:var(--alert-border);background:var(--alert-surface);color:var(--alert-text)}
+.credit-today{display:grid;gap:6px}
+.credit-today-top{display:flex;justify-content:space-between;font-size:14px;color:var(--text-secondary)}
+.credit-today-top b{color:var(--text)}
+.credit-track{display:grid;gap:14px}
+.credit-bar{height:10px;border-radius:999px;background:var(--border);overflow:hidden}
+.credit-bar i{display:block;height:100%;background:var(--green);border-radius:999px}
+.credit-bar i.over{background:var(--yellow)}
+.meter-check summary .meter-ok{color:var(--success-text)}
+.meter-form{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-top:12px}
+.meter-form label{flex:1;min-width:200px;margin:0}
+.meter-msg{font-size:13px;color:var(--text-secondary)}
+.meter-msg.ok{color:var(--success-text)}
+.meter-readings li{display:flex;justify-content:space-between;font-size:13px;padding:4px 0;color:var(--text-secondary);border-bottom:1px solid var(--border)}
+.meter-readings b{color:var(--text);font-weight:500}
+@media(max-width:760px){.credit-screen{padding:16px}.credit-facts{grid-template-columns:1fr}.cut-list li{grid-template-columns:80px 1fr}.cut-list li .text-link{grid-column:2}}
