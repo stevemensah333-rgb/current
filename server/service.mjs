@@ -102,7 +102,7 @@ export function createService(db,{clock=()=>Date.now()}={}){
   if(v.offline_ids){if(!Array.isArray(v.offline_ids))fail('offline_ids must be an array');state.offline_ids=v.offline_ids.map(x=>{const d=getDevice(id(x));if(!d.simulator_control)fail('Not a simulator channel');return d.id})}
   db.prepare('UPDATE simulation SET payload=? WHERE id=1').run(JSON.stringify(state));return state
  }
- function patchDevice(deviceId,raw){const d=getDevice(deviceId),v=object(raw);keys(v,['critical']);d.critical=bool(v.critical,'critical');db.prepare('UPDATE devices SET metadata=? WHERE id=?').run(JSON.stringify(d),d.id);return d}
+ function patchDevice(deviceId,raw){const d=getDevice(deviceId),v=object(raw);keys(v,['critical','room']);if(v.critical!=null)d.critical=bool(v.critical,'critical');if(v.room!=null)d.room=text(v.room,'room',48);db.prepare('UPDATE devices SET metadata=? WHERE id=?').run(JSON.stringify(d),d.id);return d}
  function retire(deviceId){const d=getDevice(deviceId);if(allDevices(db).some(x=>x.parent_device_id===d.id))fail('Retire dependent inferred channels first',409);db.prepare('UPDATE devices SET active=0 WHERE id=?').run(d.id);return {retired:true,history_retained:true}}
  function ingestAlert(raw,gateway){
   const a=alertInput(raw,clock())

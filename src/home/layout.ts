@@ -102,3 +102,19 @@ export const useHome = create<HomeState>((set, get) => ({
 export const roomNames = (layout: Layout) => layout.rooms.map(r => r.name)
 /** The room names of the saved home: floor 1 first, then each floor up, in layout order. */
 export function useRoomNames() { const layout = useHome(s => s.layout); return useMemo(() => [...layout.rooms].sort((a, b) => a.floor - b.floor).map(r => r.name), [layout]) }
+
+/** Where each appliance should be after the house changes. Rooms keep their id when renamed, so an appliance
+ * follows its room's new name; an appliance whose room was removed moves to the first room left.
+ * Example: "Bedroom" renamed "Kids room" -> the fan in "Bedroom" is now in "Kids room". */
+export function roomMoves(before: Layout, after: Layout, devices: {id: string; room: string}[]) {
+  const oldId = new Map(before.rooms.map(r => [r.name, r.id])), newName = new Map(after.rooms.map(r => [r.id, r.name]))
+  const first = after.rooms[0]?.name, names = new Set(after.rooms.map(r => r.name)), moves: {id: string; room: string}[] = []
+  for (const d of devices) {
+    const id = oldId.get(d.room)
+    if (id == null) continue                                  // not a room of this house: leave it
+    // renamed -> its new name; gone but a room of the same name exists (a new home type) -> stays; else the first room
+    const room = newName.get(id) ?? (names.has(d.room) ? d.room : first)
+    if (room && room !== d.room) moves.push({id: d.id, room})
+  }
+  return moves
+}

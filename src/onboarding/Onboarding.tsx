@@ -23,7 +23,7 @@ function Art({svg, className = ''}: {svg: string; className?: string}) {
 }
 
 /** Pick a home type, then shape it in the 3D house: pick a floor, add rooms, tap one to change it. */
-function Builder({draft, setDraft, theme}: {draft: Layout; setDraft: (l: Layout) => void; theme: Theme}) {
+export function Builder({draft, setDraft, theme, title = 'Build your home'}: {draft: Layout; setDraft: (l: Layout) => void; theme: Theme; title?: string}) {
   const [selected, setSelected] = useState<string | null>(null), [renaming, setRenaming] = useState(false), [name, setName] = useState('')
   const [floor, setFloor] = useState(1)
   const here = draft.rooms.filter(r => r.floor === floor)
@@ -44,7 +44,7 @@ function Builder({draft, setDraft, theme}: {draft: Layout; setDraft: (l: Layout)
   const dropFloor = (f: number) => { setDraft(removeFloor(draft, f)); goTo(Math.max(1, Math.min(floor, draft.floors - 1))) }
   const less = sized(-1), more = sized(1)
   return <>
-    <div className="ob-copy"><h1>Build your home</h1><p>{room ? `Change the ${room.name.toLowerCase()} with the buttons below.` : here.length ? 'Tap a room in the house to change it, or add one below.' : `Floor ${floor} is empty. Add a room below.`}</p></div>
+    <div className="ob-copy"><h1>{title}</h1><p>{room ? `Change the ${room.name.toLowerCase()} with the buttons below.` : here.length ? 'Tap a room in the house to change it, or add one below.' : `Floor ${floor} is empty. Add a room below.`}</p></div>
     <div className="ob-types" role="radiogroup" aria-label="Home type">{(Object.keys(HOMES) as HomeKind[]).map(h =>
       <button key={h} role="radio" aria-checked={draft.home === h} className={`ob-type ${draft.home === h ? 'sel' : ''}`} onClick={() => { if (h !== draft.home) { setDraft(starter(h)); goTo(1) } }}><Art svg={HOMES[h]}/><span>{HOME_NAMES[h]}</span></button>)}</div>
     <div className="ob-floors" role="tablist" aria-label="Floors">
@@ -98,7 +98,7 @@ export default function Onboarding({theme, onDone}: {theme: Theme; onDone?: () =
       <div className="ob-bar" aria-hidden="true">{Array.from({length: STEPS}, (_, i) => <i key={i} className={i <= step ? 'on' : ''}/>)}</div>
       <section className="ob-stage" key={`${step}-${lesson}`} aria-live="polite">
         {step === 0 && <><button className="ob-hero play" key={play} onClick={() => setPlay(p => p + 1)} aria-label="Play again"><Art svg={HERO.welcome}/></button>
-          <div className="ob-copy"><h1>Welcome to Apeiron</h1><p>See and understand your home’s power. Setup takes about 2 minutes.</p></div></>}
+          <div className="ob-copy"><h1>Welcome to Current</h1><p>See and understand your home’s power. Setup takes about 2 minutes.</p></div></>}
         {step === 1 && <><button className={`ob-scene ${key} play`} key={play} onClick={() => setPlay(p => p + 1)} aria-label="Play again"><Art svg={LESSONS[key]}/></button>
           <div className="ob-copy"><h1>{title}</h1>{line && <p>{line}</p>}</div>
           <div className="ob-pips">{LESSON_LIST.map((_, i) => <button key={i} className={i === lesson ? 'on' : ''} aria-label={`Lesson ${i + 1}`} aria-current={i === lesson} onClick={() => setLesson(i)}/>)}</div></>}

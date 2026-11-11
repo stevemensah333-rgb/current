@@ -268,3 +268,8 @@
 .register-details{margin:16px 0 0}
 .register-details>.live-row,.register-details>.turn-table-wrap{margin-top:12px}
 .register-modal form>.muted{margin:0 0 12px}
+.remove-confirm{margin-top:12px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface)}
+.remove-confirm p{margin:0 0 10px;font-size:14px;line-height:1.5;color:var(--text)}
+.remove-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.remove-actions .primary{margin-left:0;min-width:0}
+.room-row select{width:auto;min-width:140px;max-width:55%}
