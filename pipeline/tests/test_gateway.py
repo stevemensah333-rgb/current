@@ -375,3 +375,48 @@ def test_an_appliance_left_on_restarts_the_quiet_check(library):
     assert live[0]["phase"] == "quiet" and live[-1]["phase"] == "turns"
     assert live[-1]["quiet_a"] < 0.05                                   # measured with the heater off, not on
     assert live[-1]["expecting"] == "on" and pipe.detector.threshold >= S.threshold_a
+
+
+def test_an_appliance_removed_in_the_app_is_forgotten(library):
+    lib = Library(list(library.devices))                          # kettle and fridge
+    pipe = Pipeline(S, lib, NearestModel(), now_ms=lambda: 0)
+    box = Outbox(lambda path, body: 200, lambda: 0)
+    app = {"now": {"mains", "kettle", "fridge"}}
+    saved = []
+    g = Gateway(pipe, box, Clock(lambda: 0), save=lambda: saved.append(1), app_channels=lambda: app["now"])
+    stream = cycles_from([(5, OFF)] * 4, seed=1)
+    g.feed(stream[0])
+    assert sorted(g.channels) == ["fridge", "kettle"]
+    app["now"] = {"mains", "kettle"}                              # the user removed the fridge in the app
+    g.feed(stream[1])
+    assert g.channels == ["kettle"] and [d.label for d in lib.devices] == ["kettle"] and saved
+    # a device the app has not listed yet (registered a moment ago) is not mistaken for a removed one
+    g.channels.append("heater")
+    g.feed(stream[2])
+    assert "heater" in g.channels
+
+
+def test_without_an_answer_from_the_app_nothing_is_forgotten(library):
+    lib = Library(list(library.devices))
+    g = Gateway(Pipeline(S, lib, NearestModel(), now_ms=lambda: 0), Outbox(lambda p, b: 200, lambda: 0),
+                Clock(lambda: 0), app_channels=lambda: None)
+    g.feed(cycles_from([(5, OFF)], seed=1)[0])
+    assert len(lib.devices) == 2
+
+
+def test_connect_forgets_an_appliance_removed_in_the_app(monkeypatch, tmp_path, library):
+    """The fridge's channel was removed in the app; registering it again is refused (409), so startup forgets it
+    instead of stopping with an error."""
+    lib = Library(list(library.devices))
+
+    def request(api, method, path, token, body=None, timeout=10):
+        if path == "/api/v1/gateways":
+            return 201, {"token": "secret"}
+        if path == "/api/v1/snapshot":
+            return 200, {"devices": [{"id": "mains"}, {"id": "kettle"}]}
+        if path == "/api/v1/devices" and json.loads(body)["id"] == "fridge":
+            return 409, {"error": "Conflicting ID"}
+        return 201, {}
+    monkeypatch.setattr(gw, "request", request)
+    assert connect("http://x", "owner", tmp_path / "k.key", lib) == []
+    assert [d.label for d in lib.devices] == ["kettle"]

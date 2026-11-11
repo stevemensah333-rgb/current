@@ -138,17 +138,23 @@ class RegistrationWatch:
     The gateway only reads .wanted, so a slow or stopped backend never holds up the readings.
     While the backend cannot be reached the last answer is kept, so a short outage does not cancel a registration."""
 
-    def __init__(self, fetch: Callable[[], tuple[int, object]], every_s: float = 2.0):
-        self.fetch, self.every_s = fetch, every_s
+    def __init__(self, fetch: Callable[[], tuple[int, object]], every_s: float = 2.0,
+                 fetch_channels: Callable[[], tuple[int, object]] | None = None):
+        self.fetch, self.every_s, self.fetch_channels = fetch, every_s, fetch_channels
         self.wanted: dict | None = None
+        self.channels: set[str] | None = None   # the app's active channels; None until the backend has answered
 
     def check(self) -> None:
         try:
             status, body = self.fetch()
+            if status == 200 and isinstance(body, dict):
+                self.wanted = body.get("registration")
+            if self.fetch_channels is not None:
+                status, body = self.fetch_channels()
+                if status == 200 and isinstance(body, dict) and isinstance(body.get("devices"), list):
+                    self.channels = {d["id"] for d in body["devices"] if isinstance(d, dict) and "id" in d}
         except Exception:   # backend down or an odd answer: keep the last one; the thread must never die
             return
-        if status == 200 and isinstance(body, dict):
-            self.wanted = body.get("registration")
 
     def start(self) -> "RegistrationWatch":
         import threading
@@ -163,9 +169,12 @@ class RegistrationWatch:
 
 class Gateway:
     def __init__(self, pipeline, outbox: Outbox, clock: Clock, replay: bool = False,
-                 save: Callable[[], None] = lambda: None, wanted: Callable[[], dict | None] = lambda: None):
+                 save: Callable[[], None] = lambda: None, wanted: Callable[[], dict | None] = lambda: None,
+                 app_channels: Callable[[], set[str] | None] = lambda: None):
         self.pipe, self.outbox, self.clock, self.save = pipeline, outbox, clock, save
         self.wanted = wanted
+        self.app_channels = app_channels
+        self.seen_in_app: set[str] = set()     # channels the app has listed at least once
         self.registration: str | None = None   # id of the registration running now
         self.reg_ended: set[str] = set()      # finished here; the app's answer can lag by one poll
         self.reg_messages = 0
@@ -336,6 +345,31 @@ class Gateway:
         log(f"quiet check: line at {self.quiet_level:.3f} A, switches over {threshold:.3f} A ({MAINS_V * threshold:.0f} W) count")
         self.quiet = None
 
+    def _forget_removed(self) -> None:
+        """An appliance removed in the app is forgotten here too: taken out of the library (so it is never matched
+        again), off the on-list, and no longer posted. Only a channel the app listed before and no longer lists
+        counts as removed, so a device registered a moment ago is never mistaken for a removed one."""
+        active = self.app_channels()
+        if active is None:
+            return
+        self.seen_in_app |= active
+        gone = {ch for ch in self.channels if ch in self.seen_in_app and ch not in active}
+        if not gone:
+            return
+        lib = self.pipe.library
+        names = sorted({base_name(d.label) for d in lib.devices if channel_id(d.label) in gone})
+        lib.devices = [d for d in lib.devices if channel_id(d.label) not in gone]
+        house = getattr(self.pipe, "house", None)
+        if house is not None:
+            house.on_list = [e for e in house.on_list if channel_id(e.label) not in gone]
+        self.channels = [ch for ch in self.channels if ch not in gone]
+        for ch in gone:
+            self.last_va.pop(ch, None)
+            self.last_p.pop(ch, None)
+        self.seen_in_app -= gone       # registering it again later starts fresh
+        self.save()
+        log(f"removed in the app, forgotten here: {', '.join(names) or ', '.join(sorted(gone))}")
+
     def _send_live(self, c, wall_ms: int) -> None:
         """While registering: the current of every cycle, once a second, plus what the monitor is doing now.
         measuring = a switch was seen and is being measured; expecting = the switch the user should make next."""
@@ -392,6 +426,7 @@ class Gateway:
         if events or flags or health:
             self.save()
         self._follow_registration()
+        self._forget_removed()
         self._send_live(c, wall)
 
         if self.pipe.capturing:
@@ -443,7 +478,7 @@ def connect(api: str, owner_token: str, key_file: str | Path, library: Library) 
     if status != 200:
         raise SystemExit(f"Could not read the backend ({status}). Is it running at {api}?")
     existing = {d["id"] for d in snapshot["devices"]}
-    added = []
+    added, removed = [], []
     wanted = [{"id": "mains", "name": "Whole-home clamp", "role": "whole_home", "measurement_kind": "aggregate",
                "expected_interval_s": POST_EVERY_MS // 1000}]
     for ch, ds in sorted(devices.items()):
@@ -456,6 +491,11 @@ def connect(api: str, owner_token: str, key_file: str | Path, library: Library) 
             continue
         status, body = request(api, "POST", "/api/v1/devices", owner_token,
                                json.dumps({**d, "gateway_id": GATEWAY_ID}).encode())
+        if status == 409 and d["role"] == "appliance":
+            # The id is taken by a channel removed in the app: the user removed this appliance, so forget it here.
+            library.devices = [x for x in library.devices if channel_id(x.label) != d["id"]]
+            removed.append(d["id"])
+            continue
         if status != 201:
             raise SystemExit(f"Could not register {d['id']} ({status}): {body}")
         added.append(d["id"])
@@ -467,8 +507,10 @@ def run(lines, pipeline, api: str, gateway_token: str, replay: bool, save: Calla
     """Feeds every cycle through the gateway. A replay is paced at real time, so its readings land 'now'."""
     from shp.transform import transform
     outbox = Outbox(lambda path, body: request(api, "POST", path, gateway_token, body)[0], now_ms)
-    watch = RegistrationWatch(lambda: request(api, "GET", "/api/v1/gateway/registration", gateway_token, timeout=2)).start()
-    gw = Gateway(pipeline, outbox, Clock(now_ms), replay=replay, save=save, wanted=lambda: watch.wanted)
+    watch = RegistrationWatch(lambda: request(api, "GET", "/api/v1/gateway/registration", gateway_token, timeout=2),
+                              fetch_channels=lambda: request(api, "GET", "/api/v1/gateway/config", gateway_token, timeout=2)).start()
+    gw = Gateway(pipeline, outbox, Clock(now_ms), replay=replay, save=save, wanted=lambda: watch.wanted,
+                 app_channels=lambda: watch.channels)
     for c in transform(lines):
         if replay:
             while now_ms() < pipeline.house.to_wall(c.t_ms):

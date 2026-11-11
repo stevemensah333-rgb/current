@@ -244,11 +244,17 @@ def cmd_connect(args):
     if not os.environ.get("APEIRON_OWNER_TOKEN") and not owner_file.exists():
         raise SystemExit(f"No owner key at {owner_file}. Start the backend once (npm run dev:nilm) to create it.")
     owner = os.environ.get("APEIRON_OWNER_TOKEN") or owner_file.read_text().strip()
+    lib = Library.load(LIBRARY)
+    before = {d.name for d in lib.devices}
     try:
-        added = connect(_api(), owner, _key_file(), Library.load(LIBRARY))
+        added = connect(_api(), owner, _key_file(), lib)
     except OSError:
         raise SystemExit(f"The backend is not running at {_api()}. Start it first (npm run dev:nilm or npm run server).")
-    print(f"connected; added: {', '.join(added) if added else 'nothing new'}")
+    forgotten = before - {d.name for d in lib.devices}
+    if forgotten:                       # removed in the app: the library forgets them too
+        lib.save(LIBRARY)
+    print(f"connected; added: {', '.join(added) if added else 'nothing new'}"
+          + (f"; removed in the app, forgotten: {', '.join(sorted(forgotten))}" if forgotten else ""))
 
 
 def cmd_gateway(args):
